@@ -212,17 +212,19 @@ Remplacer `backup-host` par un alias SSH configuré et `age1…` par la clé pub
 
 ## Mettre à jour
 
-Avant une mise à jour, récupérer une sauvegarde chiffrée et éprouver sa restauration. Conserver `.env` et `DATA_ROOT`. Depuis `/opt/torrentduck` :
+Pour les mises à jour courantes d'un dépôt Git installé dans `/opt/torrentduck`, copier une fois le script dans le compte propriétaire du dépôt :
 
 ```sh
-git status --short
-git pull --ff-only
-sudo docker compose config -q
-sudo docker compose --profile maintenance pull postgres certbot
-sudo sh scripts/deploy.sh
+cd /opt/torrentduck
+install -m 755 scripts/update.sh "$HOME/deploy-torrentduck.sh"
+"$HOME/deploy-torrentduck.sh"
 ```
 
-Examiner les modifications locales avant le pull et les éventuelles nouvelles variables de `.env.example` avant le déploiement. Garder les secrets existants, en particulier `POSTGRES_ADMIN_PASSWORD`, `POSTGRES_PASSWORD` et le mot de passe de `DATABASE_URL` : changer seulement ces variables ne change pas les mots de passe d'une base déjà initialisée. Une rotation doit coordonner PostgreSQL et la configuration applicative. Maintenir PostgreSQL en version majeure 17 pour cette procédure ; un changement de version majeure exige une migration dédiée. Reprendre les contrôles de fonctionnement après la mise à jour.
+Les fois suivantes, lancer simplement `~/deploy-torrentduck.sh`, **sans sudo devant le script**. Git utilise le compte courant ; sudo demande le mot de passe pour la partie Docker et système. Le dépôt doit avoir une branche avec un suivi distant configuré. Le script refuse deux déploiements simultanés et les modifications locales, y compris les fichiers non suivis non ignorés, puis fait `git pull --ff-only` et appelle `scripts/deploy.sh` : construction, schéma, pare-feu et unités systemd restent gérés par la procédure existante. Il recrée ensuite Nginx pour appliquer son template et vérifie `/api/health` en HTTPS public. Les sessions web et FTPS peuvent être interrompues.
+
+Le nettoyage s'exécute avant la construction et à la sortie, même en cas d'échec : seules les images sans tag du projet qui ne sont plus utilisées par un conteneur sont supprimées. Le cache de build inutilisé du builder Docker par défaut est réduit avec `--keep-storage 1GB` ; ce cache est commun aux autres projets éventuels de l'hôte. Le script exige au moins 10 % libres plus 5 Gio sur le volume Docker avant de construire. Il ne crée ni archive ni tag de sauvegarde et ne supprime aucun volume, fichier partagé, téléchargement ou sauvegarde existante. Les sorties restent dans le terminal.
+
+Conserver une sauvegarde externe régulière et éprouver sa restauration séparément : ce script n'en crée pas à chaque déploiement. Il ne télécharge pas automatiquement de nouvelles images PostgreSQL ou Certbot ; leur mise à jour reste une opération de maintenance. Examiner les éventuelles nouvelles variables de `.env.example` avant le déploiement. Garder `.env`, `DATA_ROOT` et les secrets existants, en particulier `POSTGRES_ADMIN_PASSWORD`, `POSTGRES_PASSWORD` et le mot de passe de `DATABASE_URL` : changer seulement ces variables ne change pas les mots de passe d'une base déjà initialisée. Une rotation doit coordonner PostgreSQL et la configuration applicative. Maintenir PostgreSQL en version majeure 17 pour cette procédure ; un changement de version majeure exige une migration dédiée. Reprendre les contrôles de fonctionnement après la mise à jour.
 
 ## Tests de protocoles sur une instance de test
 

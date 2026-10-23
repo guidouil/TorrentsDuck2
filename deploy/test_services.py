@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +26,92 @@ guardian = load("ftp_guardian", "ftp/guardian.py")
 
 
 class Services(unittest.TestCase):
+    def test_update_checks_disk_and_preserves_cleanup_and_failures(self):
+        source = (Path(__file__).resolve().parents[1] / "scripts/update.sh").read_text()
+        for scenario in ["success", "dirty", "staged", "untracked", "locked", "low-disk", "failed-deploy", "failed-health"]:
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                executable = root / "bin"
+                executable.mkdir()
+                (root / ".git").mkdir()
+                (root / "scripts").mkdir()
+                script = root / "update.sh"
+                script.write_text(source.replace("cd /opt/torrentduck", "cd " + shlex.quote(str(root)), 1))
+                (root / "scripts/deploy.sh").write_text('#!/bin/sh\necho deploy >> "$CALLS"\nexit "$DEPLOY_EXIT"\n')
+                stubs = {
+                    "id": '#!/bin/sh\necho 1000\n',
+                    "flock": '#!/bin/sh\necho "flock $*" >> "$CALLS"\nif test "$SCENARIO" = locked; then exit 1; fi\n',
+                    "git": '''#!/bin/sh
+echo "git $*" >> "$CALLS"
+case "$*:$SCENARIO" in
+  "status --porcelain:dirty") echo ' M tracked';;
+  "status --porcelain:staged") echo 'M  tracked';;
+  "status --porcelain:untracked") echo '?? fixture';;
+esac
+''',
+                    "sudo": '#!/bin/sh\necho "sudo $*" >> "$CALLS"\nexec "$@"\n',
+                    "df": '''#!/bin/sh
+echo "df $*" >> "$CALLS"
+echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
+echo "fixture 100000000 0 $DISK_AVAILABLE 0% /fixture/docker"
+''',
+                    "docker": '''#!/bin/sh
+echo "docker $*" >> "$CALLS"
+case "$*" in
+  info*) echo /fixture/docker;;
+  "compose exec -T web node --input-type=module -")
+    cat > "$HEALTH_SCRIPT"
+    if test "$SCENARIO" = failed-health; then exit 38; fi
+    ;;
+esac
+''',
+                }
+                for name, body in stubs.items():
+                    (executable / name).write_text(body)
+                    (executable / name).chmod(0o700)
+                calls = root / "calls"
+                environment = {
+                    **os.environ, "PATH": str(executable) + ":" + os.environ["PATH"],
+                    "CALLS": str(calls), "HEALTH_SCRIPT": str(root / "health.js"), "SCENARIO": scenario,
+                    "DISK_AVAILABLE": "15242879" if scenario == "low-disk" else "15242880",
+                    "DEPLOY_EXIT": "37" if scenario == "failed-deploy" else "0",
+                }
+                result = subprocess.run(["sh", str(script)], env=environment, capture_output=True, text=True)
+                commands = calls.read_text().splitlines()
+                if scenario in ["dirty", "staged", "untracked", "locked"]:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(any(command.startswith(("git pull", "sudo", "docker")) for command in commands))
+                    if scenario == "locked":
+                        self.assertEqual(commands, ["flock -n 9"])
+                    continue
+                cleanup = "docker image prune -f --filter label=com.docker.compose.project=torrentduck"
+                cache_cleanup = "docker builder prune -af --keep-storage 1GB"
+                self.assertEqual(commands.count(cleanup), 2)
+                self.assertEqual(commands.count(cache_cleanup), 2)
+                self.assertEqual(commands[-2:], [cleanup, cache_cleanup])
+                self.assertFalse(any("volume" in command or "system prune" in command or "backup" in command for command in commands))
+                self.assertLess(commands.index("git pull --ff-only"), commands.index("sudo sh -s"))
+                self.assertLess(commands.index(cleanup), commands.index("df -Pk /fixture/docker"))
+                if scenario == "low-disk":
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertNotIn("deploy", commands)
+                    continue
+                self.assertLess(commands.index("df -Pk /fixture/docker"), commands.index("deploy"))
+                nginx = "docker compose up -d --no-deps --force-recreate --wait nginx"
+                health = "docker compose exec -T web node --input-type=module -"
+                if scenario == "failed-deploy":
+                    self.assertEqual(result.returncode, 37)
+                    self.assertNotIn(nginx, commands)
+                    self.assertNotIn(health, commands)
+                else:
+                    self.assertEqual(result.returncode, 38 if scenario == "failed-health" else 0, result.stderr)
+                    self.assertLess(commands.index("deploy"), commands.index(nginx))
+                    self.assertLess(commands.index(nginx), commands.index(health))
+                    self.assertIn("process.env.ORIGIN + '/api/health'", (root / "health.js").read_text())
+                    self.assertIn("(await response.json()).status === 'ok'", (root / "health.js").read_text())
+                    if scenario == "failed-health":
+                        self.assertNotIn("Deployment complete", result.stdout)
+
     @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
     def test_local_compose_is_isolated_and_persistent(self):
         result = subprocess.run(
