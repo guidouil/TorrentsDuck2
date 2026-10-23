@@ -1,0 +1,17 @@
+[Unit]
+Description=Torrents Duck stack and torrent egress policy
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/torrentduck
+ExecStartPre=/bin/sh /opt/torrentduck/deploy/firewall.sh
+ExecStart=/usr/bin/docker compose up -d --wait
+ExecStop=/usr/bin/docker compose stop
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,54 @@
+{
+  "name": "torrents-duck",
+  "version": "2.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guidouil/TorrentsDuck2.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js dev --host 127.0.0.1",
+    "local:up": "docker compose -f compose.local.yaml up --build -d --wait",
+    "local:down": "docker compose -f compose.local.yaml down",
+    "local:logs": "docker compose -f compose.local.yaml logs -f --tail=100",
+    "local:admin": "docker compose -f compose.local.yaml exec -e ADMIN_USERNAME=admin -e ADMIN_EMAIL=admin@example.com -e ADMIN_PASSWORD=local-admin-password web node --import tsx scripts/create-admin.ts",
+    "build": "BETTER_AUTH_SECRET=build-only-placeholder-not-a-runtime-secret-0123456789 vite build",
+    "start": "node build",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "tsx scripts/migrate-db.ts",
+    "users:import": "tsx scripts/migrate-users.ts",
+    "admin:create": "tsx scripts/create-admin.ts"
+  },
+  "dependencies": {
+    "@sveltejs/adapter-node": "^6.0.0",
+    "@sveltejs/kit": "^3.1.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "bcryptjs": "^3.0.3",
+    "better-auth": "^1.7.12",
+    "busboy": "^1.6.0",
+    "nodemailer": "^10.2.0",
+    "pg": "^8.23.1",
+    "svelte": "^5.57.2",
+    "tsx": "^4.23.15",
+    "vite": "^8.3.5"
+  },
+  "devDependencies": {
+    "@types/busboy": "^1.5.5",
+    "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.23.1",
+    "svelte-check": "^4.7.7",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5"
+  },
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  }
+}

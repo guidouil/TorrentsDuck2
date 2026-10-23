@@ -1,0 +1,101 @@
+name: torrentduck-local
+
+# Local test fixtures only: these credentials must never be used in production.
+services:
+  volumes:
+    image: postgres:17-bookworm
+    entrypoint: [sh, -c, 'chown 10000:10000 /data/downloads /data/share /config']
+    network_mode: none
+    volumes:
+      - downloads:/data/downloads
+      - share:/data/share
+      - qbittorrent:/config
+
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: duck
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local-postgres-admin-password
+      DUCK_DB_PASSWORD: local-postgres-app-password
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./deploy/postgres/01-duck.sql:/docker-entrypoint-initdb.d/01-duck.sql:ro
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U duck -d duck]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  web:
+    build:
+      context: .
+      args:
+        ORIGIN: http://127.0.0.1:5180
+    command: [sh, -c, 'node --import tsx scripts/migrate-db.ts && exec node build']
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: '3000'
+      ORIGIN: http://127.0.0.1:5180
+      BETTER_AUTH_URL: http://127.0.0.1:5180
+      BETTER_AUTH_SECRET: local-only-auth-secret-not-for-production-0123456789
+      INTERNAL_API_SECRET: local-only-internal-secret-not-for-production-9876543210
+      DATABASE_URL: postgresql://duck:local-postgres-app-password@postgres:5432/duck
+      QBT_URL: http://qbittorrent:8080
+      QBT_USERNAME: duck-rpc
+      QBT_PASSWORD: local-only-qbittorrent-password
+      DATA_ROOT: /data
+      DOWNLOADS_DIR: /data/downloads
+      SHARE_DIR: /data/share
+      QBT_DOWNLOAD_PATH: /data/downloads
+      FILE_DELIVERY: node
+      BODY_SIZE_LIMIT: '1073741824'
+    ports: ['127.0.0.1:5180:3000']
+    volumes:
+      - downloads:/data/downloads:ro
+      - share:/data/share
+    networks: [edge, database, rpc]
+    depends_on:
+      volumes: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+      qbittorrent: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://127.0.0.1:3000/api/health").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))']
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  qbittorrent:
+    build: deploy/qbittorrent
+    environment:
+      QBT_USERNAME: duck-rpc
+      QBT_PASSWORD: local-only-qbittorrent-password
+    volumes:
+      - qbittorrent:/config
+      - downloads:/data/downloads
+    networks:
+      rpc: {ipv4_address: 172.30.20.2}
+    depends_on:
+      volumes: {condition: service_completed_successfully}
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python3, -c, 'import socket; socket.create_connection(("172.30.20.2", 8080), 3).close()']
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres:
+  downloads:
+  share:
+  qbittorrent:
+
+networks:
+  edge:
+  database: {internal: true}
+  rpc: {internal: true, ipam: {config: [{subnet: 172.30.20.0/24}]}}

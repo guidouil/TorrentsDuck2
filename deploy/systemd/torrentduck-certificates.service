@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew HTTPS and explicit FTPS certificates
+After=torrentduck.service
+Requires=torrentduck.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/torrentduck
+ExecStart=/bin/sh /opt/torrentduck/scripts/deploy-certificates.sh renew
+UMask=0077

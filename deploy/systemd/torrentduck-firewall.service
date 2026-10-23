@@ -1,0 +1,11 @@
+[Unit]
+Description=Torrents Duck torrent egress restrictions before Docker autostart
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh /opt/torrentduck/deploy/firewall.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+<script lang="ts">
+  import { t } from '#lib/i18n.js';
+  import { goto, invalidateAll } from '$app/navigation';
+  import { api } from '#lib/client.js';
+  import QuackLogo from '#lib/QuackLogo.svelte';
+  let identifier = $state(''); let password = $state(''); let error = $state(''); let busy = $state(false); let reset = $state(false); let email = $state(''); let sent = $state(false);
+  async function submit(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; try { if (reset) { await api('/api/auth/request-password-reset', { method: 'POST', body: JSON.stringify({ email, redirectTo: `${window.location.origin}/reset-password` }) }); sent = true; } else { await api('/api/auth/sign-in/identifier', { method: 'POST', body: JSON.stringify({ identifier, password }) }); await invalidateAll(); await goto('/'); } } catch (e) { error = (e as Error).message; } finally { busy = false; } }
+</script>
+<svelte:head><title>{$t.login} · Torrents Duck</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
+<div class="auth-page"><section class="auth-card"><QuackLogo /><h1>{reset ? $t.resetPassword : $t.login}</h1>{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if sent}<div class="notice success" role="status">{$t.resetSent}</div>{:else}<form class="form-stack" onsubmit={submit}>{#if reset}<label>{$t.email}<input type="email" required bind:value={email} autocomplete="email" /></label>{:else}<label>{$t.identifier}<input required bind:value={identifier} autocomplete="username" /></label><label>{$t.password}<input type="password" required bind:value={password} autocomplete="current-password" maxlength={1024} /></label>{/if}<button class="primary" disabled={busy}>{busy ? $t.signingIn : reset ? $t.receiveLink : $t.login}</button></form>{/if}<div class="auth-links"><a href="/register">{$t.register}</a><button onclick={() => { reset = !reset; error = ''; sent = false; }}>{reset ? $t.backLogin : $t.forgotPassword}</button></div></section></div>
