@@ -1,8 +1,8 @@
 import { betterAuth } from 'better-auth';
-import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
+import { APIError, createAuthMiddleware, getSession, getSessionFromCtx } from 'better-auth/api';
 import { setSessionCookie } from 'better-auth/cookies';
 import { deviceAuthorization, username } from 'better-auth/plugins';
-import { db, query } from './db';
+import { db, query, transaction } from './db';
 import { checkPassword, hashPassword, LEGACY_PREFIX } from './passwords';
 import { sendResetEmail, sendVerificationEmail } from './mail';
 import { audit } from './audit';
@@ -104,6 +104,17 @@ export const auth = betterAuth({
   },
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === '/sign-out') {
+        // Propagate lookup errors so a failed revocation cannot report a successful sign-out.
+        const session = await getSession()({
+          ...ctx, headers: ctx.headers ?? new Headers(), method: 'GET', asResponse: false, returnHeaders: false, returnStatus: false,
+          query: { disableCookieCache: true, disableRefresh: true }
+        });
+        if (session) await transaction(async (client) => {
+          await client.query('DELETE FROM "deviceCode" WHERE "userId"=$1', [session.user.id]);
+          await client.query('DELETE FROM session WHERE "userId"=$1', [session.user.id]);
+        });
+      }
       if (ctx.path === '/device/code') {
         if (ctx.body?.user_id !== undefined || ctx.body?.scope !== undefined) throw new APIError('BAD_REQUEST', { message: 'Unsupported device authorization fields' });
         await query('DELETE FROM "deviceCode" WHERE "expiresAt" < now()');

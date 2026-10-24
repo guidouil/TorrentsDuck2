@@ -207,6 +207,42 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     expect((await db.query('SELECT id FROM "deviceCode" WHERE "deviceCode"=$1', [expired.device_code])).rows).toEqual([]);
   });
 
+  it('signs out every password and TV session without affecting another account', async () => {
+    const originalCookie = cookie;
+    const secondCookie = await login(email);
+    const tvDevice = await approveDevice(cookie);
+    const tvResponse = await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: tvDevice.device_code, client_id: 'torrents-duck-tv' });
+    expect(tvResponse.status).toBe(200);
+    const tvCookie = tvResponse.headers.getSetCookie().map((part) => part.split(';')[0]).join('; ');
+    expect((await authModule.requireMember(event('/api/files', undefined, tvCookie))).id).toBe(memberId);
+    const unusedDevice = await approveDevice(cookie);
+    const otherDevice = await approveDevice(adminCookie);
+    try {
+      const foreignOrigin = await authModule.auth.handler(new Request(`${origin}/api/auth/sign-out`, {
+        method: 'POST', headers: { origin: 'https://untrusted.example.org', 'content-type': 'application/json', cookie }, body: '{}'
+      }));
+      expect(foreignOrigin.status).toBe(403);
+      expect((await authModule.requireMember(event('/api/files', undefined, secondCookie))).id).toBe(memberId);
+      const response = await deviceRequest('/sign-out', {}, cookie);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ success: true });
+      expect(response.headers.getSetCookie().join(';')).toContain('Max-Age=0');
+      for (const sessionCookie of [cookie, secondCookie, tvCookie]) {
+        await expect(authModule.requireMember(event('/api/files', undefined, sessionCookie))).rejects.toMatchObject({ status: 401 });
+      }
+      expect((await db.query('SELECT id FROM session WHERE "userId"=$1', [memberId])).rows).toEqual([]);
+      expect((await db.query('SELECT id FROM "deviceCode" WHERE "userId"=$1', [memberId])).rows).toEqual([]);
+      expect(await (await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: unusedDevice.device_code, client_id: 'torrents-duck-tv' })).json()).toMatchObject({ error: 'invalid_grant' });
+      expect((await authModule.requireAdmin(event('/api/admin/users', undefined, adminCookie))).id).toBe(adminId);
+      expect((await db.query('SELECT id FROM "deviceCode" WHERE "deviceCode"=$1', [otherDevice.device_code])).rows).toHaveLength(1);
+    } finally {
+      cookie = await login(email);
+    }
+    for (const staleCookie of ['', originalCookie]) expect((await deviceRequest('/sign-out', {}, staleCookie)).status).toBe(200);
+    expect((await authModule.requireMember(event('/api/files', undefined, cookie))).id).toBe(memberId);
+    expect((await authModule.requireAdmin(event('/api/admin/users', undefined, adminCookie))).id).toBe(adminId);
+  });
+
   it('uses the same legacy upgrade over private FTPS authentication and rejects the wrong secret', async () => {
     await expect(ftpRoute.POST(event('/api/internal/ftp-auth', { username: `${prefix}-ftp`, password }))).rejects.toMatchObject({ status: 401 });
     const response = await ftpRoute.POST(event('/api/internal/ftp-auth', { username: `${prefix}-ftp`, password }, '', true));
@@ -256,6 +292,20 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     ]) await expect(request()).rejects.toMatchObject({ status: 403 });
     await expect(ftpRoute.POST(event('/api/internal/ftp-auth', { username: body.username, password }, '', true))).rejects.toMatchObject({ status: 401 });
     expect(await authModule.verifyCredentials(body.username, password)).toBeNull();
+  });
+
+  it('also signs out all sessions for an account awaiting approval', async () => {
+    const secondCookie = await login(`${prefix}+public@example.org`);
+    try {
+      expect((await deviceRequest('/sign-out', {}, secondCookie)).status).toBe(200);
+      for (const sessionCookie of [pendingCookie, secondCookie]) {
+        expect(await authModule.auth.api.getSession({ headers: new Headers({ cookie: sessionCookie }) })).toBeNull();
+      }
+      expect((await db.query('SELECT id FROM session WHERE "userId"=$1', [pendingId])).rows).toEqual([]);
+      expect((await authModule.requireAdmin(event('/api/admin/users', undefined, adminCookie))).id).toBe(adminId);
+    } finally {
+      pendingCookie = await login(`${prefix}+public@example.org`);
+    }
   });
 
   it('rejects duplicate registration identities without creating more accounts', async () => {

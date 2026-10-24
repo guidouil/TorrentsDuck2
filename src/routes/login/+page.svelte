@@ -89,7 +89,10 @@
 </script>
 
 <svelte:head><title>{$t.login} · Torrents Duck</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
-<div class="auth-page">
+<div class={['auth-page', { 'device-page': phone && qrImage && deviceStatus === 'waiting' }]}>
+  {#if phone && qrImage && deviceStatus === 'waiting'}
+    <img class="qr-code" src={qrImage} alt={$t.deviceQrAlt} width="256" height="256" />
+  {/if}
   <section class="auth-card">
     <QuackLogo />
     <h1>{phone ? $t.deviceLogin : reset ? $t.resetPassword : $t.login}</h1>
@@ -99,7 +102,6 @@
         {#if phoneBusy}<p role="status">{$t.creating}</p>
         {:else if deviceStatus === 'waiting'}
           <p>{$t.deviceScan}</p>
-          <img class="qr-code" src={qrImage} alt={$t.deviceQrAlt} width="256" height="256" />
           <span class="device-code">{userCode}</span>
           <p class="device-status" role="status">{reconnecting ? $t.connecting : $t.deviceWaiting}<br />{$t.deviceExpires} {duration(remaining)}</p>
         {:else}
@@ -126,10 +128,16 @@
 
 <style>
   .phone-button { width: 100%; margin-top: 16px; }
+  .device-page { grid-template-columns: minmax(0, calc(100dvh - 32px)) minmax(280px, 380px); justify-content: center; gap: 32px; padding: 16px 24px; }
+  .device-page .auth-card { width: 100%; }
   .device-login { display: grid; justify-items: center; gap: 16px; text-align: center; }
   .device-login p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--muted); }
   .device-login > button { width: 100%; }
-  .qr-code { display: block; width: 256px; max-width: 100%; height: auto; background: white; border-radius: var(--shape-lg); }
+  .qr-code { display: block; width: 100%; height: auto; background: white; border-radius: var(--shape-lg); }
   .device-code { padding: 8px 16px; background: var(--secondary-container); color: var(--on-secondary-container); border-radius: var(--shape-md); font-size: 28px; font-weight: 600; letter-spacing: 3px; overflow-wrap: anywhere; }
   .device-status { min-height: 3em; }
+  @media (max-width: 700px) {
+    .device-page { grid-template-columns: minmax(0, 460px); gap: 24px; padding: 88px 24px 32px; }
+    .qr-code { max-width: calc(100dvh - 120px); }
+  }
 </style>

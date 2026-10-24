@@ -9,7 +9,24 @@
   let { data, children } = $props();
   let light = $state(false);
   let error = $state('');
-  onMount(() => { light = localStorage.getItem('theme') === 'light'; });
+  onMount(() => {
+    light = localStorage.getItem('theme') === 'light';
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function checkSession() {
+      try {
+        const session = await api('/api/auth/get-session?disableCookieCache=true');
+        if (stopped) return;
+        if (!session?.user?.enabled || !session.user.approved) {
+          await goto(session?.user?.enabled ? '/waiting' : '/login', { refreshAll: true, replace: true });
+          return;
+        }
+      } catch { /* Retry when the connection is available again. */ }
+      if (!stopped) timer = setTimeout(checkSession, 5000);
+    }
+    void checkSession();
+    return () => { stopped = true; clearTimeout(timer); };
+  });
   $effect(() => { document.documentElement.dataset.theme = light ? 'light' : 'dark'; });
   function toggleTheme() { light = !light; localStorage.setItem('theme', light ? 'light' : 'dark'); }
   function toggleLanguage() { language.update((l) => { const next = l === 'fr' ? 'en' : 'fr'; localStorage.setItem('language', next); document.documentElement.lang = next; return next; }); }
