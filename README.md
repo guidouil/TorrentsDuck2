@@ -8,6 +8,8 @@ L’inscription est libre ; chaque nouveau compte reste sur une page d’attente
 
 Pour connecter une télé sans y saisir son mot de passe, choisir « Se connecter avec mon téléphone » sur la page de connexion. Scanner le QR code, se connecter sur le téléphone si nécessaire, comparer le code affiché sur les deux écrans puis autoriser la connexion. Le QR code expire après cinq minutes et ne peut servir qu’une fois. N’autoriser que les demandes lancées sur son propre appareil ; le navigateur de la télé reste connecté jusqu’à sa déconnexion ou l’expiration de sa session. Les deux appareils doivent pouvoir accéder à la même adresse du site (HTTPS en production).
 
+Dans l’explorateur, l’action « Ouvrir dans VLC » prépare un lien de lecture valable six heures et révocable. Sur Android, iPhone et iPad, toucher ensuite le bouton « Ouvrir dans VLC » de la fenêtre pour transmettre le média à l’application installée ; le navigateur peut demander confirmation. Le site ne peut pas vérifier si VLC est installé. La copie du lien et la playlist restent disponibles, notamment sur ordinateur ou si le navigateur bloque l’ouverture de l’application.
+
 ## Docker local
 
 Avec Docker, Compose et npm disponibles, lancer depuis la racine du dépôt :

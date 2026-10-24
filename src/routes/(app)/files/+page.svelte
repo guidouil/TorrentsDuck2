@@ -17,6 +17,7 @@
   let entries = $state<Entry[]>([]); let total = $state(0); let loading = $state(true); let busy = $state(false); let error = $state(''); let notice = $state('');
   let filesInput = $state<HTMLInputElement>(); let dialogOpen = $state(false); let operation = $state('mkdir'); let selected = $state<Entry | null>(null); let newName = $state('');
   let videoOpen = $state(false); let video = $state<Entry | null>(null); let linkOpen = $state(false); let link = $state<any>(null);
+  let vlcLink = $state('');
   let ftpsOpen = $state(false);
   let requestNumber = 0;
   const fileIcon = (name: string) => /\.(mp4|m4v|webm|ogv|mkv|mov|avi|mpeg|mpg|wmv|flv|m2ts|mts|vob|3gp)$/i.test(name) ? 'video-file' : /\.(mp3|m4a|ogg|oga|flac|wav|aac|opus|aiff|aif|wma|ape|alac)$/i.test(name) ? 'audio-file' : 'file';
@@ -37,7 +38,17 @@
   function ask(action: string, entry: Entry | null = null) { operation = action; selected = entry; newName = action === 'rename' && entry ? entry.name : ''; dialogOpen = true; }
   async function mutate(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; try { await api('/api/files', { method: 'POST', body: JSON.stringify({ action: operation, space, path: selected?.path ?? path, name: newName, confirm: operation === 'delete' }) }); dialogOpen = false; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   async function upload(event: Event) { const input = event.currentTarget as HTMLInputElement; if (!input.files?.length) return; const uploadPath = path; busy = true; error = ''; notice = ''; try { for (const file of Array.from(input.files)) { notice = `${$t.uploading} ${file.name}…`; const body = new FormData(); body.set('file', file); body.set('action', 'upload'); await api(`/api/files?${new URLSearchParams({ space: 'share', path: uploadPath })}`, { method: 'POST', body }); } notice = $t.uploaded; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; input.value = ''; } }
-  async function makeLink(entry: Entry) { busy = true; error = ''; try { link = await api('/api/files/share', { method: 'POST', body: JSON.stringify({ space, path: entry.path }) }); linkOpen = true; } catch (e) { error = (e as Error).message; } finally { busy = false; } }
+  function mobileVlcUrl(url: string, name: string) {
+    const { userAgent, maxTouchPoints } = navigator;
+    if (/Android/i.test(userAgent)) {
+      const media = new URL(url);
+      // VLC needs a MIME type to accept our playback URLs without a file extension.
+      return `intent://${media.host}${media.pathname}${media.search}#Intent;scheme=${media.protocol.slice(0, -1)};package=org.videolan.vlc;type=${fileIcon(name) === 'audio-file' ? 'audio' : 'video'}/*;end`;
+    }
+    if (/iPhone|iPad|iPod/i.test(userAgent) || (/Macintosh/i.test(userAgent) && maxTouchPoints > 1)) return `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(url)}`;
+    return '';
+  }
+  async function makeLink(entry: Entry) { busy = true; error = ''; try { link = await api('/api/files/share', { method: 'POST', body: JSON.stringify({ space, path: entry.path }) }); vlcLink = mobileVlcUrl(link.url, entry.name); linkOpen = true; } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   async function revoke() { try { await api('/api/files/share', { method: 'DELETE', body: JSON.stringify({ id: link.id }) }); linkOpen = false; notice = $t.linkRevoked; } catch (e) { error = (e as Error).message; } }
   async function copyLink() { try { await navigator.clipboard.writeText(new URL(link.url, window.location.origin).href); notice = $t.linkCopied; } catch { notice = $t.copyManually; } }
   function downloadPlaylist() { const blob = new Blob([`#EXTM3U\n${new URL(link.url, window.location.origin).href}\n`], { type: 'audio/x-mpegurl' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'torrents-duck.m3u'; a.click(); URL.revokeObjectURL(url); }
@@ -85,7 +96,7 @@
 <div class="panel-bottom"><span>{total} {$t.items} · {$t.ftpsPort}</span><div class="pagination"><button aria-label={$t.previous} disabled={busy || loading || offset === 0} onclick={() => browse({ offset: String(Math.max(0, offset - 50)) })}><Icon name="chevron-left" size={18} /></button><span>{Math.floor(offset / 50) + 1} / {Math.max(1, Math.ceil(total / 50))}</span><button aria-label={$t.next} disabled={busy || loading || offset + 50 >= total} onclick={() => browse({ offset: String(offset + 50) })}><Icon name="chevron-right" size={18} /></button></div></div></section>
 <Modal bind:open={dialogOpen} title={operation === 'mkdir' ? $t.newFolder : operation === 'rename' ? $t.rename : $t.delete}><form onsubmit={mutate} class="form-stack">{#if operation === 'delete'}<p>{$t.deleteFileBefore} {selected?.name} {$t.deleteFileAfter}</p>{:else}<label>{$t.name}<input required bind:value={newName} maxlength={240} /></label>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button type="button" class="secondary" onclick={() => { dialogOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: operation === 'delete' }]} disabled={busy}>{operation === 'delete' ? $t.deletePermanently : $t.save}</button></div></form></Modal>
 <Modal bind:open={videoOpen} title={video?.name ?? $t.play} wide={true}>{#if video && videoOpen}<video class="video-player" controls preload="metadata" src={fileUrl(video, true)} onloadedmetadata={(event) => { event.currentTarget.muted = false; event.currentTarget.volume = 1; }}><track kind="captions" />{$t.browserUnsupported}</video><p>{$t.playbackHelp}</p><div class="dialog-actions"><a class="button secondary" href={fileUrl(video)}>{$t.download}</a><button class="primary" onclick={() => video && makeLink(video)}>{$t.share}</button></div>{/if}</Modal>
-<Modal bind:open={linkOpen} title={$t.share}>{#if link}<p>{$t.linkExpires} {new Date(link.expiresAt).toLocaleString($language)}. {$t.linkPrivate}</p><div class="token-box">{link.url}</div><div class="dialog-actions"><button class="secondary danger" onclick={revoke}>{$t.revoke}</button><button class="secondary" onclick={copyLink}>{$t.copy}</button><button class="primary" onclick={downloadPlaylist}>{$t.vlcPlaylist}</button></div>{/if}</Modal>
+<Modal bind:open={linkOpen} title={$t.share}>{#if link}<p>{$t.linkExpires} {new Date(link.expiresAt).toLocaleString($language)}. {$t.linkPrivate}</p>{#if vlcLink}<p>{$t.vlcMobileHelp}</p>{/if}<div class="token-box">{link.url}</div><div class="dialog-actions"><button class="secondary danger" onclick={revoke}>{$t.revoke}</button><button class="secondary" onclick={copyLink}>{$t.copy}</button><button class={vlcLink ? 'secondary' : 'primary'} onclick={downloadPlaylist}>{$t.vlcPlaylist}</button>{#if vlcLink}<a class="button primary" href={vlcLink}>{$t.share}</a>{/if}</div>{/if}</Modal>
 <Modal bind:open={ftpsOpen} title={$t.ftpsTitle}>
   <p>{$t.ftpsInstructions}</p>
   <dl class="ftps-settings">
