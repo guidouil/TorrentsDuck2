@@ -10,7 +10,7 @@
   let stats = $state<any>({}); let storage = $state<any>({});
   let loading = $state(true); let connected = $state(false); let error = $state(''); let notice = $state('');
   let query = $state(''); let mine = $state(false); let sort = $state('progress'); let limit = $state(25); let currentPage = $state(1);
-  let addOpen = $state(false); let source = $state(''); let upload = $state<File | undefined>(); let busy = $state(false);
+  let source = $state(''); let upload = $state<File | undefined>(); let busy = $state(false);
   let removal = $state<Torrent | null>(null); let removeOpen = $state(false); let deleteData = $state(false);
   const filtered = $derived(torrents.filter((x) => x.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) && (!mine || x.authorId === data.user?.id)).sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'speed' ? b.downloadSpeed - a.downloadSpeed : b.progress - a.progress));
   const rows = $derived(filtered.slice((currentPage - 1) * limit, currentPage * limit));
@@ -25,14 +25,14 @@
     events.addEventListener('engine-error', (e) => { try { error = JSON.parse((e as MessageEvent).data).error; loading = false; } catch { error = $t.engineUnavailable; } });
     return () => events.close();
   });
-  async function addTorrent(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; try { const body = new FormData(); if (upload) body.set('torrent', upload); else body.set('source', source); await api('/api/torrents', { method: 'POST', body }); addOpen = false; source = ''; upload = undefined; notice = $t.torrentAdded; snapshot(await api('/api/torrents')); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
+  async function addTorrent(event: SubmitEvent) { event.preventDefault(); const form = event.currentTarget as HTMLFormElement; busy = true; error = ''; notice = ''; try { const body = new FormData(); if (upload) body.set('torrent', upload); else body.set('source', source); await api('/api/torrents', { method: 'POST', body }); source = ''; upload = undefined; form.reset(); notice = $t.torrentAdded; snapshot(await api('/api/torrents')); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   async function action(torrent: Torrent, action: string, confirm = false) { busy = true; error = ''; try { await api(`/api/torrents/${encodeURIComponent(torrent.hash)}`, { method: 'POST', body: JSON.stringify({ action, confirm }) }); removeOpen = false; snapshot(await api('/api/torrents')); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   function askRemove(torrent: Torrent, withData: boolean) { removal = torrent; deleteData = withData; removeOpen = true; }
   const stopped = (state: string) => /paused|stopped|error|missing/i.test(state);
   const stateLabel = (state: string, progress: number) => /error|missing/i.test(state) ? $t.stateError : stopped(state) ? $t.statePaused : progress >= 1 ? $t.stateSharing : /stalled/i.test(state) ? $t.stateWaiting : $t.downloading;
 </script>
 <svelte:head><title>{$t.transfers} · Torrents Duck</title></svelte:head>
-<div class="page-heading"><h1>{$t.transfers}</h1><button class="primary" onclick={() => { addOpen = true; }}><Icon name="plus" />{$t.add}</button></div>
+<div class="page-heading"><h1>{$t.transfers}</h1></div>
 <div class="stat-grid">
   <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="download" size={16} /></span> {$t.downloading}</div><div class="stat-value">{bytes(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((s, x) => s + x.downloadSpeed, 0))}<small> /s</small></div><div class="stat-foot">{torrents.filter((x) => x.progress < 1 && !stopped(x.state)).length} {$t.activeTransfers}</div></div>
   <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="upload" size={16} /></span> {$t.uploadingLabel}</div><div class="stat-value">{bytes(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((s, x) => s + x.uploadSpeed, 0))}<small> /s</small></div></div>
@@ -41,6 +41,16 @@
 </div>
 {#if error}<div class="notice error" role="alert">{error}</div>{/if}
 {#if notice}<div class="notice success" role="status">{notice} <button class="quiet-button" aria-label={$t.close} onclick={() => { notice = ''; }}><Icon name="x" size={16} /></button></div>{/if}
+<details class="panel torrent-add">
+  <summary><Icon name="plus" size={18} /><strong>{$t.add}</strong><span class="add-description">{$t.torrentsDescription}</span><span class="disclosure-chevron"><Icon name="chevron-right" size={18} /></span></summary>
+  <form onsubmit={addTorrent}>
+    <fieldset class="add-fields" disabled={busy}>
+      <label>{$t.magnetUrl}<input bind:value={source} placeholder="magnet:?xt=urn:btih:…" disabled={busy || !!upload} /></label>
+      <label>{$t.torrentFile}<input type="file" accept=".torrent,application/x-bittorrent" onchange={(e) => { upload = e.currentTarget.files?.[0]; }} /></label>
+      <button class="primary" disabled={busy || (!source.trim() && !upload)}>{busy ? '…' : $t.add}</button>
+    </fieldset>
+  </form>
+</details>
 <section class="panel" aria-label={$t.transfers}>
   <div class="toolbar"><input class="search" aria-label={$t.search} placeholder={$t.search} bind:value={query} oninput={() => { currentPage = 1; }} /><select aria-label={$t.sort} bind:value={sort} onchange={() => { currentPage = 1; }}><option value="progress">{$t.progress}</option><option value="name">{$t.name}</option><option value="speed">{$t.speed}</option></select><div class="spacer"></div><label class="check-label"><input type="checkbox" bind:checked={mine} onchange={() => { currentPage = 1; }} />{$t.mine}</label><select aria-label={$t.transferCount} bind:value={limit} onchange={() => { currentPage = 1; }}><option value={25}>25 / page</option><option value={50}>50 / page</option><option value={100}>100 / page</option></select></div>
   {#if loading}
@@ -69,20 +79,36 @@
   {/if}
   <div class="panel-bottom"><span>{filtered.length} {$t.transfers.toLocaleLowerCase()} <span class="muted">·</span> <span class="loading-indicator"><span class="tiny-dot"></span>{connected ? $t.live : $t.connecting}</span></span><div class="pagination"><button aria-label={$t.previousPage} disabled={currentPage <= 1} onclick={() => currentPage--}><Icon name="chevron-left" size={18} /></button><span>{currentPage} / {pages}</span><button aria-label={$t.nextPage} disabled={currentPage >= pages} onclick={() => currentPage++}><Icon name="chevron-right" size={18} /></button></div></div>
 </section>
-<Modal bind:open={addOpen} title={$t.add}><form onsubmit={addTorrent} class="form-stack"><p>{$t.torrentsDescription}</p><label>{$t.magnetUrl}<input bind:value={source} placeholder="magnet:?xt=urn:btih:…" disabled={!!upload} /></label><div class="dropzone"><label>{$t.torrentFile}<input type="file" accept=".torrent,application/x-bittorrent" onchange={(e) => { upload = e.currentTarget.files?.[0]; }} /></label></div>{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button class="secondary" type="button" onclick={() => { addOpen = false; }}>{$t.cancel}</button><button class="primary" disabled={busy || (!source.trim() && !upload)}>{busy ? '…' : $t.add}</button></div></form></Modal>
 <Modal bind:open={removeOpen} title={deleteData ? $t.delete : $t.remove}>{#if removal}<p><strong>{removal.name}</strong></p><p>{deleteData ? $t.deleteTorrentHelp : $t.removeTorrentHelp}</p><div class="dialog-actions"><button class="secondary" onclick={() => { removeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: deleteData }]} disabled={busy} onclick={() => removal && action(removal, deleteData ? 'delete' : 'remove', deleteData)}>{deleteData ? $t.deletePermanently : $t.remove}</button></div>{/if}</Modal>
 <style>
+  .torrent-add{margin-bottom:14px}
+  .torrent-add summary{display:flex;align-items:center;gap:8px;padding:12px 16px;cursor:pointer;list-style:none}
+  .torrent-add summary::-webkit-details-marker{display:none}
+  .torrent-add summary:focus-visible{outline:3px solid var(--accent-ink);outline-offset:-3px;border-radius:var(--shape-lg)}
+  .add-description{color:var(--muted);font-size:12px}
+  .disclosure-chevron{margin-left:auto;display:flex}
+  .torrent-add[open] .disclosure-chevron{transform:rotate(90deg)}
+  .add-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;align-items:end;gap:12px;margin:0;padding:0 16px 14px;border:0;min-width:0}
+  .add-fields label,.add-fields input{min-width:0}
+  .add-fields label{font-size:12px;gap:6px}
+  .add-fields input{padding:9px 12px;min-height:44px}
+  .add-fields input[type=file]{padding:7px 8px}
+  @media(max-width:700px){
+    .add-description{display:none}
+    .add-fields{grid-template-columns:minmax(0,1fr)}
+    .add-fields button{justify-self:end}
+  }
   table{table-layout:fixed}
   th:nth-child(2){width:18%}
   th:nth-child(3){width:17%}
   th:nth-child(4){width:14%}
   th:last-child{width:174px}
-  td,th{padding:18px 14px}
+  td,th{padding:8px 14px}
   .torrent-name,.name-detail{min-width:0}
   .torrent-name strong{max-width:100%}
   .torrent-name small{line-height:1.6}
   .transfer-speed{display:flex;align-items:center;gap:5px;white-space:nowrap}
-  small.transfer-speed{margin-top:7px}
+  small.transfer-speed{margin-top:4px}
   .mobile-label,.action-label{display:none}
   .row-actions .icon-button{display:inline-flex;align-items:center;justify-content:center;gap:7px}
   @media(max-width:1100px){
@@ -90,17 +116,17 @@
     table,tbody{display:block;width:100%}
     thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
     tbody{padding:12px;display:grid;gap:12px}
-    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:16px;background:var(--surface-container);border:0;border-radius:var(--shape-lg)}
+    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px;background:var(--surface-container);border:0;border-radius:var(--shape-lg)}
     td{padding:0;border:0;min-width:0}
     .name-cell,.progress-cell,.actions-cell{grid-column:1/-1}
     .torrent-name{max-width:none;align-items:flex-start}
     .torrent-name strong{white-space:normal;overflow-wrap:anywhere;font-size:14px;line-height:1.5}
     .torrent-name small{font-size:12px;margin-top:5px}
-    .mobile-label{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}
+    .mobile-label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}
     .progress-caption{font-size:12px}
     .progress{height:6px}
     .badge{white-space:normal;line-height:1.4}
-    .row-actions{justify-content:flex-start;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+    .row-actions{justify-content:flex-start;flex-wrap:wrap;gap:6px;padding-top:8px;border-top:1px solid var(--line)}
     .row-actions .icon-button{padding:10px 14px;font-size:13px;min-height:44px}
     .action-label{display:inline}
     .panel-bottom{flex-wrap:wrap;gap:16px}
@@ -108,7 +134,7 @@
   }
   @media(max-width:400px){
     tbody{padding:10px;gap:10px}
-    tr{padding:12px;gap:14px}
+    tr{padding:10px;gap:10px}
     .row-actions{gap:6px}
     .row-actions .icon-button{padding:9px 7px;font-size:12px}
   }

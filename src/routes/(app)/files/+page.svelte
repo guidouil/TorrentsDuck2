@@ -1,11 +1,19 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { api, bytes } from '#lib/client.js';
   import { language, t } from '#lib/i18n.js';
   import Modal from '#lib/Modal.svelte';
   import Icon from '#lib/Icon.svelte';
   type Entry = { name: string; path: string; directory: boolean; size: number; modifiedAt: string };
-  let space = $state('downloads'); let path = $state(''); let query = $state(''); let sort = $state('name'); let offset = $state(0);
+  const location = $derived(page.shallow?.url ?? page.url);
+  const space = $derived(location.searchParams.get('space') === 'share' ? 'share' : 'downloads');
+  const path = $derived(location.searchParams.get('path') ?? '');
+  const query = $derived(location.searchParams.get('search') ?? '');
+  const sort = $derived(location.searchParams.get('sort') ?? 'name');
+  const requestedOffset = $derived(Number(location.searchParams.get('offset')));
+  const offset = $derived(Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0);
+  const parts = $derived(path.split('/').filter(Boolean));
   let entries = $state<Entry[]>([]); let total = $state(0); let loading = $state(true); let busy = $state(false); let error = $state(''); let notice = $state('');
   let filesInput = $state<HTMLInputElement>(); let dialogOpen = $state(false); let operation = $state('mkdir'); let selected = $state<Entry | null>(null); let newName = $state('');
   let videoOpen = $state(false); let video = $state<Entry | null>(null); let linkOpen = $state(false); let link = $state<any>(null);
@@ -14,24 +22,42 @@
   const fileUrl = (entry: Entry, inline = false) => `/api/files/download?${new URLSearchParams({ space, path: entry.path, ...(inline ? { inline: '1' } : {}) })}`;
   async function loadFiles() { const number = ++requestNumber; loading = true; error = ''; try { const result = await api(`/api/files?${new URLSearchParams({ space, path, search: query, sort, offset: String(offset), limit: '50' })}`); if (number !== requestNumber) return; entries = result.entries; total = result.total; } catch (e) { if (number === requestNumber) error = (e as Error).message; } finally { if (number === requestNumber) loading = false; } }
   $effect(() => { space; path; query; sort; offset; void loadFiles(); });
-  function switchSpace(value: string) { space = value; path = ''; offset = 0; query = ''; }
-  function enter(value: string) { path = value; offset = 0; query = ''; }
+  $effect(() => { space; path; dialogOpen = false; videoOpen = false; linkOpen = false; });
+  function browse(values: Record<string, string>, replace = false) {
+    const url = new URL(location.href);
+    for (const [key, value] of Object.entries(values)) {
+      if (value) url.searchParams.set(key, value);
+      else url.searchParams.delete(key);
+    }
+    if (url.href !== location.href) void goto(url, { shallow: true, replace, reset: false });
+  }
+  function switchSpace(value: string) { browse({ space: value, path: '', offset: '', search: '' }); }
+  function enter(value: string) { browse({ path: value, offset: '', search: '' }); }
   function ask(action: string, entry: Entry | null = null) { operation = action; selected = entry; newName = action === 'rename' && entry ? entry.name : ''; dialogOpen = true; }
   async function mutate(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; try { await api('/api/files', { method: 'POST', body: JSON.stringify({ action: operation, space, path: selected?.path ?? path, name: newName, confirm: operation === 'delete' }) }); dialogOpen = false; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
-  async function upload(event: Event) { const input = event.currentTarget as HTMLInputElement; if (!input.files?.length) return; busy = true; error = ''; notice = ''; try { for (const file of Array.from(input.files)) { notice = `${$t.uploading} ${file.name}…`; const body = new FormData(); body.set('file', file); body.set('action', 'upload'); await api(`/api/files?${new URLSearchParams({ space: 'share', path })}`, { method: 'POST', body }); } notice = $t.uploaded; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; input.value = ''; } }
+  async function upload(event: Event) { const input = event.currentTarget as HTMLInputElement; if (!input.files?.length) return; const uploadPath = path; busy = true; error = ''; notice = ''; try { for (const file of Array.from(input.files)) { notice = `${$t.uploading} ${file.name}…`; const body = new FormData(); body.set('file', file); body.set('action', 'upload'); await api(`/api/files?${new URLSearchParams({ space: 'share', path: uploadPath })}`, { method: 'POST', body }); } notice = $t.uploaded; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; input.value = ''; } }
   async function makeLink(entry: Entry) { busy = true; error = ''; try { link = await api('/api/files/share', { method: 'POST', body: JSON.stringify({ space, path: entry.path }) }); linkOpen = true; } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   async function revoke() { try { await api('/api/files/share', { method: 'DELETE', body: JSON.stringify({ id: link.id }) }); linkOpen = false; notice = $t.linkRevoked; } catch (e) { error = (e as Error).message; } }
   async function copyLink() { try { await navigator.clipboard.writeText(new URL(link.url, window.location.origin).href); notice = $t.linkCopied; } catch { notice = $t.copyManually; } }
   function downloadPlaylist() { const blob = new Blob([`#EXTM3U\n${new URL(link.url, window.location.origin).href}\n`], { type: 'audio/x-mpegurl' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'torrents-duck.m3u'; a.click(); URL.revokeObjectURL(url); }
 </script>
 <svelte:head><title>{$t.files} · Torrents Duck</title></svelte:head>
-<div class="page-heading"><h1>{$t.files}</h1><div class="file-actions"><button type="button" class="secondary" onclick={() => { ftpsOpen = true; }}>{$t.ftpsHelp}</button>{#if space === 'share'}<button class="primary" disabled={busy} onclick={() => filesInput?.click()}><Icon name="upload" />{$t.upload}</button>{/if}</div></div>
-<div class="tabs"><button class={{ selected: space === 'downloads' }} aria-pressed={space === 'downloads'} onclick={() => switchSpace('downloads')}><Icon name="download" size={18} />{$t.downloads}</button><button class={{ selected: space === 'share' }} aria-pressed={space === 'share'} onclick={() => switchSpace('share')}><Icon name="folder" size={18} />{$t.shared}</button></div>
-<p class="subtitle" style="margin-top:15px">{space === 'downloads' ? $t.downloadsDescription : $t.shareDescription}</p>
-<div class="breadcrumbs" aria-label={$t.path}><button onclick={() => enter('')}>{space === 'downloads' ? $t.downloads : $t.shared}</button>{#each path.split('/').filter(Boolean) as part, i (path.split('/').slice(0, i + 1).join('/'))}<span>/</span><button onclick={() => enter(path.split('/').slice(0, i + 1).join('/'))}>{part}</button>{/each}</div>
-{#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice" role="status">{notice}</div>{/if}
+<h1 class="sr-only">{$t.files}</h1>
 <input class="sr-only" type="file" multiple bind:this={filesInput} onchange={upload} aria-label={$t.upload} />
-<section class="panel" aria-label={$t.files}><div class="toolbar"><input class="search" placeholder={$t.search} aria-label={$t.search} bind:value={query} oninput={() => { offset = 0; }} /><select aria-label={$t.sort} bind:value={sort}><option value="name">{$t.name}</option><option value="modifiedAt">{$t.date}</option><option value="size">{$t.size}</option></select><div class="spacer"></div>{#if space === 'share'}<button class="secondary" disabled={busy} onclick={() => ask('mkdir')}><Icon name="plus" size={18} />{$t.newFolder}</button>{/if}</div>
+<section class="panel explorer-panel" aria-label={$t.files}>
+  <div class="toolbar explorer-toolbar">
+    <div class="tabs" aria-label={$t.files}>
+      <button class={{ selected: space === 'downloads' }} aria-pressed={space === 'downloads'} title={$t.downloadsDescription} disabled={busy} onclick={() => switchSpace('downloads')}><Icon name="download" size={18} />{$t.downloads}</button>
+      <button class={{ selected: space === 'share' }} aria-pressed={space === 'share'} title={$t.shareDescription} disabled={busy} onclick={() => switchSpace('share')}><Icon name="folder" size={18} />{$t.shared}</button>
+    </div>
+    <input class="search" type="search" placeholder={$t.search} aria-label={$t.search} value={query} oninput={(event) => browse({ search: event.currentTarget.value, offset: '' }, Boolean(query))} />
+    <select aria-label={$t.sort} value={sort} onchange={(event) => browse({ sort: event.currentTarget.value, offset: '' })}><option value="name">{$t.name}</option><option value="modifiedAt">{$t.date}</option><option value="size">{$t.size}</option></select>
+  </div>
+  <div class="explorer-location">
+    <div class="breadcrumbs" aria-label={$t.path}><button disabled={busy} onclick={() => enter('')}>{space === 'downloads' ? $t.downloads : $t.shared}</button>{#each parts as part, i (parts.slice(0, i + 1).join('/'))}<span>/</span><button disabled={busy} onclick={() => enter(parts.slice(0, i + 1).join('/'))} aria-current={i === parts.length - 1 ? 'location' : undefined}>{part}</button>{/each}</div>
+    <div class="file-actions"><button type="button" class="secondary" onclick={() => { ftpsOpen = true; }}>{$t.ftpsHelp}</button>{#if space === 'share'}<button class="secondary" disabled={busy} onclick={() => ask('mkdir')}><Icon name="plus" size={18} />{$t.newFolder}</button><button class="primary" disabled={busy} onclick={() => filesInput?.click()}><Icon name="upload" size={18} />{$t.upload}</button>{/if}</div>
+  </div>
+  {#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice" role="status">{notice}</div>{/if}
 {#if loading}
   <div class="empty"><p>{$t.loadingPage}</p></div>
 {:else if !entries.length}
@@ -40,12 +66,12 @@
   <div class="table-wrap">
     <!-- Preserve table semantics when CSS displays rows as cards. -->
       <!-- svelte-ignore a11y_no_redundant_roles -->
-      <table role="table" aria-label={$t.files}>
+      <table role="table" aria-label={$t.files} class={{ editable: space === 'share' }}>
       <thead role="rowgroup"><tr role="row"><th scope="col">{$t.name}</th><th scope="col">{$t.size}</th><th scope="col">{$t.date}</th><th scope="col"><span class="sr-only">{$t.actions}</span></th></tr></thead>
       <tbody role="rowgroup">
         {#each entries as entry (entry.path)}
           <tr role="row">
-            <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name="file" /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
+            <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" disabled={busy} onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name="file" /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.size}</span>{entry.directory ? '—' : bytes(entry.size)}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.date}</span>{new Date(entry.modifiedAt).toLocaleDateString($language)}</td>
             <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={18} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => { video = entry; videoOpen = true; }}><Icon name="play" size={18} /><span class="action-label">{$t.play}</span></button><button class="icon-button" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="share" size={18} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={18} /><span class="action-label">{$t.rename}</span></button><button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={18} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
@@ -55,7 +81,7 @@
     </table>
   </div>
 {/if}
-<div class="panel-bottom"><span>{total} {$t.items} · {$t.ftpsPort}</span><div class="pagination"><button aria-label={$t.previous} disabled={offset === 0} onclick={() => { offset = Math.max(0, offset - 50); }}><Icon name="chevron-left" size={18} /></button><span>{Math.floor(offset / 50) + 1} / {Math.max(1, Math.ceil(total / 50))}</span><button aria-label={$t.next} disabled={offset + 50 >= total} onclick={() => { offset += 50; }}><Icon name="chevron-right" size={18} /></button></div></div></section>
+<div class="panel-bottom"><span>{total} {$t.items} · {$t.ftpsPort}</span><div class="pagination"><button aria-label={$t.previous} disabled={busy || loading || offset === 0} onclick={() => browse({ offset: String(Math.max(0, offset - 50)) })}><Icon name="chevron-left" size={18} /></button><span>{Math.floor(offset / 50) + 1} / {Math.max(1, Math.ceil(total / 50))}</span><button aria-label={$t.next} disabled={busy || loading || offset + 50 >= total} onclick={() => browse({ offset: String(offset + 50) })}><Icon name="chevron-right" size={18} /></button></div></div></section>
 <Modal bind:open={dialogOpen} title={operation === 'mkdir' ? $t.newFolder : operation === 'rename' ? $t.rename : $t.delete}><form onsubmit={mutate} class="form-stack">{#if operation === 'delete'}<p>{$t.deleteFileBefore} {selected?.name} {$t.deleteFileAfter}</p>{:else}<label>{$t.name}<input required bind:value={newName} maxlength={240} /></label>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button type="button" class="secondary" onclick={() => { dialogOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: operation === 'delete' }]} disabled={busy}>{operation === 'delete' ? $t.deletePermanently : $t.save}</button></div></form></Modal>
 <Modal bind:open={videoOpen} title={video?.name ?? $t.play} wide={true}>{#if video && videoOpen}<video class="video-player" controls preload="metadata" src={fileUrl(video, true)} onloadedmetadata={(event) => { event.currentTarget.muted = false; event.currentTarget.volume = 1; }}><track kind="captions" />{$t.browserUnsupported}</video><p>{$t.playbackHelp}</p><div class="dialog-actions"><a class="button secondary" href={fileUrl(video)}>{$t.download}</a><button class="primary" onclick={() => video && makeLink(video)}>{$t.share}</button></div>{/if}</Modal>
 <Modal bind:open={linkOpen} title={$t.share}>{#if link}<p>{$t.linkExpires} {new Date(link.expiresAt).toLocaleString($language)}. {$t.linkPrivate}</p><div class="token-box">{link.url}</div><div class="dialog-actions"><button class="secondary danger" onclick={revoke}>{$t.revoke}</button><button class="secondary" onclick={copyLink}>{$t.copy}</button><button class="primary" onclick={downloadPlaylist}>{$t.vlcPlaylist}</button></div>{/if}</Modal>
@@ -73,49 +99,65 @@
   <div class="dialog-actions"><button type="button" class="primary" onclick={() => { ftpsOpen = false; }}>{$t.close}</button></div>
 </Modal>
 <style>
-  .file-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px}
-  .tabs button,.toolbar .secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px}
+  .explorer-panel{display:flex;flex-direction:column;min-height:calc(100dvh - 44px);border-radius:var(--shape-lg)}
+  .explorer-toolbar{gap:10px;padding:10px 12px}
+  .tabs{flex-shrink:0}
+  .tabs button{gap:6px;padding:8px 14px;min-height:38px}
+  .explorer-toolbar .search{margin-left:auto;flex:1;width:auto;min-height:38px;padding:8px 14px}
+  .explorer-toolbar select{min-height:38px;padding:7px 10px}
+  .explorer-location{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:5px 12px;border-bottom:1px solid var(--line)}
+  .breadcrumbs{flex:1;min-width:0;gap:3px;margin:0}
+  .breadcrumbs button{min-height:34px;padding:5px;overflow-wrap:anywhere;text-align:left;min-width:0}
+  .file-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+  .file-actions button{min-height:34px;padding:6px 12px;font-size:12px}
+  .notice{margin:10px 12px 0;padding:10px 12px}
+  .table-wrap{flex:1}
   table{table-layout:fixed}
   th:nth-child(2){width:12%}
-  th:nth-child(3){width:16%}
-  th:last-child{width:260px}
-  td,th{padding:18px 14px}
-  .file-link{width:100%;min-width:0}
-  .breadcrumbs button{overflow-wrap:anywhere;text-align:left;min-width:0}
+  th:nth-child(3){width:15%}
+  th:last-child{width:140px}
+  table.editable th:last-child{width:220px}
+  td,th{padding:8px 12px}
+  .file-link{width:100%;min-width:0;max-width:none;gap:8px}
+  .file-glyph{width:28px;height:28px;border-radius:var(--shape-sm)}
   .mobile-label,.action-label{display:none}
-  .row-actions .icon-button{display:inline-flex;align-items:center;justify-content:center;gap:7px}
+  .row-actions .icon-button{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;padding:6px}
+  .panel-bottom{margin-top:auto;padding:8px 12px;gap:8px}
+  .pagination{gap:8px}
+  .pagination button{min-width:34px;min-height:34px;padding:6px}
+  .empty{flex:1;padding:40px 16px}
   .ftps-settings{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 16px;font-size:13px;line-height:1.6}
   .ftps-settings dt{color:var(--muted)}
   .ftps-settings dd{margin:0;overflow-wrap:anywhere}
-  @media(max-width:1100px){
+  @media(max-width:900px){
+    .explorer-panel{min-height:calc(100dvh - 180px)}
+  }
+  @media(max-width:700px){
+    .explorer-toolbar{gap:8px}
+    .tabs{width:100%}
+    .tabs button{flex:1;min-width:0;min-height:44px;padding:8px}
+    .explorer-toolbar .search{max-width:none;min-width:120px;min-height:44px}
+    .explorer-toolbar select{min-height:44px}
+    .explorer-location{gap:4px;padding:4px 8px}
+    .breadcrumbs{flex-basis:100%}
+    .breadcrumbs button{min-height:44px}
+    .file-actions{justify-content:flex-start}
+    .file-actions button{min-height:44px;padding:6px 8px;gap:4px}
     .table-wrap{overflow:visible}
     table,tbody{display:block;width:100%}
     thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-    tbody{padding:12px;display:grid;gap:12px}
-    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:16px;background:var(--surface-container);border:0;border-radius:var(--shape-lg)}
-    td{padding:0;border:0;min-width:0}
+    tbody{padding:8px;display:grid;gap:8px}
+    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px;background:var(--surface-container);border:0;border-radius:var(--shape-md)}
+    td{padding:0;border:0;min-width:0;font-size:12px}
     .name-cell,.actions-cell{grid-column:1/-1}
-    .file-link{max-width:none;align-items:flex-start}
+    .file-link{align-items:flex-start}
     .truncate{white-space:normal;overflow-wrap:anywhere;font-size:14px;line-height:1.5}
-    .mobile-label{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}
-    .row-actions{justify-content:flex-start;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+    .mobile-label{display:inline;color:var(--muted);font-size:11px;margin-right:6px}
+    .row-actions{justify-content:flex-start;flex-wrap:wrap;gap:4px}
     .row-actions:empty{display:none}
     .actions-cell:has(.row-actions:empty){display:none}
-    .row-actions .icon-button{padding:10px 14px;font-size:13px;min-height:44px}
-    .action-label{display:inline}
-    .panel-bottom{flex-wrap:wrap;gap:16px}
+    .row-actions .icon-button{min-width:44px;min-height:44px}
     .pagination{margin-left:auto}
-  }
-  @media(max-width:700px){
-    .page-heading{flex-wrap:wrap}
-    .file-actions{justify-content:flex-start;width:100%}
-    .file-actions button{flex:1}
-    .tabs button{flex:1 1 auto;min-width:0;padding:12px 8px}
-  }
-  @media(max-width:400px){
-    tbody{padding:10px;gap:10px}
-    tr{padding:12px;gap:14px}
-    .row-actions{gap:6px}
-    .row-actions .icon-button{padding:9px 7px;font-size:12px}
+    .pagination button{min-width:44px;min-height:44px}
   }
 </style>

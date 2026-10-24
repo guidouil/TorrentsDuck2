@@ -24,10 +24,11 @@
       {/each}
     </nav>
     <div class="sidebar-bottom">
+      <div class="sidebar-preferences"><button class="icon-button" onclick={toggleLanguage} aria-label={$t.language} title={$t.language}><Icon name="language" /></button><button class="icon-button" onclick={toggleTheme} aria-label={$t.theme} title={$t.theme}><Icon name={light ? 'moon' : 'sun'} /></button></div>
       <div class="account"><span class="avatar">{(data.user?.username || 'D').slice(0, 1).toUpperCase()}</span><div><a href="/account" title={$t.account}><strong>{data.user?.username}</strong></a><small>{data.user?.role === 'admin' ? $t.administrator : $t.member}</small></div><button class="icon-button" onclick={logout} title={$t.logout} aria-label={$t.logout}><Icon name="logout" /></button></div>
     </div>
   </aside>
-  <div class="main-shell"><header class="topbar"><div class="topbar-actions"><button class="quiet-button" onclick={toggleLanguage} aria-label={$t.language} title={$t.language}>{$language === 'fr' ? 'FR' : 'EN'}</button><button class="icon-button" onclick={toggleTheme} aria-label={$t.theme} title={$t.theme}><Icon name={light ? 'moon' : 'sun'} /></button><a class="quiet-button account-link" href="/account" aria-label={$t.account}><Icon name="user" /><span>{$t.account}</span></a><button class="quiet-button logout-button" onclick={logout} aria-label={$t.logout} title={$t.logout}><Icon name="logout" /><span>{$t.logout}</span></button></div></header>
+  <div class="main-shell"><header class="topbar"><div class="topbar-actions"><button class="icon-button" onclick={toggleLanguage} aria-label={$t.language} title={$t.language}><Icon name="language" /></button><button class="icon-button" onclick={toggleTheme} aria-label={$t.theme} title={$t.theme}><Icon name={light ? 'moon' : 'sun'} /></button><a class="quiet-button account-link" href="/account" aria-label={$t.account}><Icon name="user" /><span>{$t.account}</span></a><button class="quiet-button logout-button" onclick={logout} aria-label={$t.logout} title={$t.logout}><Icon name="logout" /><span>{$t.logout}</span></button></div></header>
     <main>{#if error}<div class="notice error" role="alert">{error}</div>{/if}{@render children()}</main>
   </div>
 </div>

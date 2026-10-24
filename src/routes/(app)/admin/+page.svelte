@@ -72,10 +72,10 @@
 <Modal bind:open={changeOpen} title={change?.delete ? $t.deleteAccount : $t.changePermissions}>{#if change}<p>{change.delete ? $t.confirmDeleteAccount : $t.confirmPermissions} <strong>{change.user.username}</strong> ?</p>{#if change.delete}<p>{$t.deleteAccountHelp}</p>{:else if change.enabled === false}<p>{$t.revokeWeb}</p>{/if}{#if change.delete || change.enabled === false}<p>{$t.ftpsDisconnect}</p>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button class="secondary" onclick={() => { changeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: change.delete || change.enabled === false }]} disabled={busy} onclick={() => updateUser()}>{change.delete ? $t.deletePermanently : $t.confirm}</button></div>{/if}</Modal>
 
 <style>
-  .backup-card{margin-bottom:24px}
+  .backup-card{margin-bottom:16px}
   .backup-help{margin-top:16px}
   .members-table{table-layout:fixed}
-  .members-table th,.members-table td{padding:16px 12px}
+  .members-table th,.members-table td{padding:8px 12px}
   .members-table th:nth-child(1){width:15%}
   .members-table th:nth-child(2){width:22%}
   .members-table th:nth-child(3){width:12%}
@@ -91,7 +91,7 @@
     .members-table,.members-table tbody{display:block}
     .members-table thead{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
     .members-table tbody{display:grid;gap:12px}
-    .members-table tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 16px;padding:16px;background:var(--surface-container);border:0;border-radius:var(--shape-lg)}
+    .members-table tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 12px;padding:12px;background:var(--surface-container);border:0;border-radius:var(--shape-lg)}
     .members-table td{display:block;min-width:0;padding:0;border:0;font-size:13px}
     .members-table .member-name{grid-column:1;grid-row:1;align-self:center;font-size:15px}
     .members-table .member-state{grid-column:2;grid-row:1;align-self:center;text-align:right}
