@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Notification from '#lib/Notification.svelte';
   import { onMount } from 'svelte';
   import { api } from '#lib/client.js';
   import { language, t } from '#lib/i18n.js';
@@ -15,7 +16,7 @@
 </script>
 <svelte:head><title>{$t.admin} · Torrents Duck</title></svelte:head>
 <h1 class="sr-only">{$t.admin}</h1>
-{#if error}<div class="notice error" role="alert">{error}</div>{/if}
+<Notification bind:message={error} kind="error" />
 <section class="stat-card backup-card">
   <h2>{$t.backup}</h2>
   {#if loading}
@@ -69,7 +70,7 @@
     </div>
   {/if}
 </section>
-<Modal bind:open={changeOpen} title={change?.delete ? $t.deleteAccount : $t.changePermissions}>{#if change}<p>{change.delete ? $t.confirmDeleteAccount : $t.confirmPermissions} <strong>{change.user.username}</strong> ?</p>{#if change.delete}<p>{$t.deleteAccountHelp}</p>{:else if change.enabled === false}<p>{$t.revokeWeb}</p>{/if}{#if change.delete || change.enabled === false}<p>{$t.ftpsDisconnect}</p>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button class="secondary" onclick={() => { changeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: change.delete || change.enabled === false }]} disabled={busy} onclick={() => updateUser()}>{change.delete ? $t.deletePermanently : $t.confirm}</button></div>{/if}</Modal>
+<Modal bind:open={changeOpen} title={change?.delete ? $t.deleteAccount : $t.changePermissions}>{#if change}<p>{change.delete ? $t.confirmDeleteAccount : $t.confirmPermissions} <strong>{change.user.username}</strong> ?</p>{#if change.delete}<p>{$t.deleteAccountHelp}</p>{:else if change.enabled === false}<p>{$t.revokeWeb}</p>{/if}{#if change.delete || change.enabled === false}<p>{$t.ftpsDisconnect}</p>{/if}<div class="dialog-actions"><button class="secondary" onclick={() => { changeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: change.delete || change.enabled === false }]} disabled={busy} onclick={() => updateUser()}>{change.delete ? $t.deletePermanently : $t.confirm}</button></div>{/if}</Modal>
 
 <style>
   .backup-card{margin-bottom:16px}

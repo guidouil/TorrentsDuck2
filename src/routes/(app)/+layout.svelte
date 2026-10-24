@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Notification from '#lib/Notification.svelte';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { goto, invalidateAll } from '$app/navigation';
@@ -29,6 +30,6 @@
     </div>
   </aside>
   <div class="main-shell"><header class="topbar"><div class="topbar-actions"><button class="icon-button" onclick={toggleLanguage} aria-label={$t.language} title={$t.language}><Icon name="language" /></button><button class="icon-button" onclick={toggleTheme} aria-label={$t.theme} title={$t.theme}><Icon name={light ? 'moon' : 'sun'} /></button><a class="quiet-button account-link" href="/account" aria-label={$t.account}><Icon name="user" /><span>{$t.account}</span></a><button class="quiet-button logout-button" onclick={logout} aria-label={$t.logout} title={$t.logout}><Icon name="logout" /><span>{$t.logout}</span></button></div></header>
-    <main>{#if error}<div class="notice error" role="alert">{error}</div>{/if}{@render children()}</main>
+    <main><Notification bind:message={error} kind="error" />{@render children()}</main>
   </div>
 </div>

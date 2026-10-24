@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Notification from '#lib/Notification.svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { api, bytes } from '#lib/client.js';
@@ -69,7 +70,7 @@
     <div class="breadcrumbs" aria-label={$t.path}><button disabled={busy} onclick={() => enter('')}>{space === 'downloads' ? $t.downloads : $t.shared}</button>{#each parts as part, i (parts.slice(0, i + 1).join('/'))}<span>/</span><button disabled={busy} onclick={() => enter(parts.slice(0, i + 1).join('/'))} aria-current={i === parts.length - 1 ? 'location' : undefined}>{part}</button>{/each}</div>
     <div class="file-actions"><button type="button" class="secondary" onclick={() => { ftpsOpen = true; }}>{$t.ftpsHelp}</button>{#if space === 'share'}<button class="secondary" disabled={busy} onclick={() => ask('mkdir')}><Icon name="plus" size={18} />{$t.newFolder}</button><button class="primary" disabled={busy} onclick={() => filesInput?.click()}><Icon name="upload" size={18} />{$t.upload}</button>{/if}</div>
   </div>
-  {#if error}<div class="notice error" role="alert">{error}</div>{/if}{#if notice}<div class="notice" role="status">{notice}</div>{/if}
+  <Notification bind:message={error} kind="error" /><Notification bind:message={notice} kind="info" />
 {#if loading}
   <div class="empty"><p>{$t.loadingPage}</p></div>
 {:else if !entries.length}
@@ -94,7 +95,7 @@
   </div>
 {/if}
 <div class="panel-bottom"><span>{total} {$t.items} · {$t.ftpsPort}</span><div class="pagination"><button aria-label={$t.previous} disabled={busy || loading || offset === 0} onclick={() => browse({ offset: String(Math.max(0, offset - 50)) })}><Icon name="chevron-left" size={18} /></button><span>{Math.floor(offset / 50) + 1} / {Math.max(1, Math.ceil(total / 50))}</span><button aria-label={$t.next} disabled={busy || loading || offset + 50 >= total} onclick={() => browse({ offset: String(offset + 50) })}><Icon name="chevron-right" size={18} /></button></div></div></section>
-<Modal bind:open={dialogOpen} title={operation === 'mkdir' ? $t.newFolder : operation === 'rename' ? $t.rename : $t.delete}><form onsubmit={mutate} class="form-stack">{#if operation === 'delete'}<p>{$t.deleteFileBefore} {selected?.name} {$t.deleteFileAfter}</p>{:else}<label>{$t.name}<input required bind:value={newName} maxlength={240} /></label>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button type="button" class="secondary" onclick={() => { dialogOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: operation === 'delete' }]} disabled={busy}>{operation === 'delete' ? $t.deletePermanently : $t.save}</button></div></form></Modal>
+<Modal bind:open={dialogOpen} title={operation === 'mkdir' ? $t.newFolder : operation === 'rename' ? $t.rename : $t.delete}><form onsubmit={mutate} class="form-stack">{#if operation === 'delete'}<p>{$t.deleteFileBefore} {selected?.name} {$t.deleteFileAfter}</p>{:else}<label>{$t.name}<input required bind:value={newName} maxlength={240} /></label>{/if}<div class="dialog-actions"><button type="button" class="secondary" onclick={() => { dialogOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: operation === 'delete' }]} disabled={busy}>{operation === 'delete' ? $t.deletePermanently : $t.save}</button></div></form></Modal>
 <Modal bind:open={videoOpen} title={video?.name ?? $t.play} wide={true}>{#if video && videoOpen}<video class="video-player" controls preload="metadata" src={fileUrl(video, true)} onloadedmetadata={(event) => { event.currentTarget.muted = false; event.currentTarget.volume = 1; }}><track kind="captions" />{$t.browserUnsupported}</video><p>{$t.playbackHelp}</p><div class="dialog-actions"><a class="button secondary" href={fileUrl(video)}>{$t.download}</a><button class="primary" onclick={() => video && makeLink(video)}>{$t.share}</button></div>{/if}</Modal>
 <Modal bind:open={linkOpen} title={$t.share}>{#if link}<p>{$t.linkExpires} {new Date(link.expiresAt).toLocaleString($language)}. {$t.linkPrivate}</p>{#if vlcLink}<p>{$t.vlcMobileHelp}</p>{/if}<div class="token-box">{link.url}</div><div class="dialog-actions"><button class="secondary danger" onclick={revoke}>{$t.revoke}</button><button class="secondary" onclick={copyLink}>{$t.copy}</button><button class={vlcLink ? 'secondary' : 'primary'} onclick={downloadPlaylist}>{$t.vlcPlaylist}</button>{#if vlcLink}<a class="button primary" href={vlcLink}>{$t.share}</a>{/if}</div>{/if}</Modal>
 <Modal bind:open={ftpsOpen} title={$t.ftpsTitle}>
@@ -122,7 +123,6 @@
   .breadcrumbs button{min-height:34px;padding:5px;overflow-wrap:anywhere;text-align:left;min-width:0}
   .file-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
   .file-actions button{min-height:34px;padding:6px 12px;font-size:12px}
-  .notice{margin:10px 12px 0;padding:10px 12px}
   .table-wrap{flex:1}
   table{table-layout:fixed}
   th:nth-child(2){width:12%}

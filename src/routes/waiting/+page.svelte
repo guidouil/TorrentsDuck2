@@ -5,6 +5,7 @@
   import { api } from '#lib/client.js';
   import { t } from '#lib/i18n.js';
   import QuackLogo from '#lib/QuackLogo.svelte';
+  import Notification from '#lib/Notification.svelte';
   let { data } = $props();
   let error = $state(''); let busy = $state(false); let sent = $state(false);
   const verificationRequired = $derived(data.user?.role === 'admin' && !data.user.emailVerified);
@@ -46,10 +47,10 @@
     <h1>{verificationRequired ? $t.verifyEmail : $t.waiting}</h1>
     {#if verificationRequired}
       <p class="subtitle">{$t.verificationHelp}<br /><strong>{data.user?.email}</strong></p>
-      {#if sent}<p class="notice success" role="status">{$t.verificationSent}</p>{/if}
+      <Notification message={sent ? $t.verificationSent : ''} kind="success" />
       <button class="primary" disabled={busy} onclick={resendVerification}>{$t.resendVerification}</button>
     {/if}
-    {#if error || verificationError}<p class="notice error" role="alert">{error || verificationError}</p>{/if}
+    <Notification message={error || verificationError} kind="error" />
     <button class="secondary" disabled={busy} onclick={logout}>{$t.logout}</button>
   </section>
 </main>

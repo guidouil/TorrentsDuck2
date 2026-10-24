@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Notification from '#lib/Notification.svelte';
   import { onMount } from 'svelte';
   import { api, bytes, duration } from '#lib/client.js';
   import { t } from '#lib/i18n.js';
@@ -25,7 +26,7 @@
     events.addEventListener('engine-error', (e) => { try { error = JSON.parse((e as MessageEvent).data).error; loading = false; } catch { error = $t.engineUnavailable; } });
     return () => events.close();
   });
-  async function addTorrent(event: SubmitEvent) { event.preventDefault(); const form = event.currentTarget as HTMLFormElement; busy = true; error = ''; notice = ''; try { const body = new FormData(); if (upload) body.set('torrent', upload); else body.set('source', source); await api('/api/torrents', { method: 'POST', body }); source = ''; upload = undefined; form.reset(); notice = $t.torrentAdded; snapshot(await api('/api/torrents')); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
+  async function addTorrent(event: SubmitEvent) { event.preventDefault(); if (busy || (!source.trim() && !upload)) return; const form = event.currentTarget as HTMLFormElement; busy = true; error = ''; notice = ''; try { const body = new FormData(); if (upload) body.set('torrent', upload); else body.set('source', source); await api('/api/torrents', { method: 'POST', body }); source = ''; upload = undefined; form.reset(); notice = $t.torrentAdded; snapshot(await api('/api/torrents')); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   async function action(torrent: Torrent, action: string, confirm = false) { busy = true; error = ''; try { await api(`/api/torrents/${encodeURIComponent(torrent.hash)}`, { method: 'POST', body: JSON.stringify({ action, confirm }) }); removeOpen = false; snapshot(await api('/api/torrents')); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   function askRemove(torrent: Torrent, withData: boolean) { removal = torrent; deleteData = withData; removeOpen = true; }
   const stopped = (state: string) => /paused|stopped|error|missing/i.test(state);
@@ -39,15 +40,15 @@
   <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="library" size={16} /></span> {$t.library}</div><div class="stat-value">{torrents.length}<small> torrents</small></div><div class="stat-foot">{torrents.filter((x) => x.progress >= 1).length} {$t.completedAvailable}</div></div>
   <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="disk" size={16} /></span> {$t.availableSpace}</div><div class="stat-value">{storage.available !== undefined ? bytes(storage.available) : '—'}</div><div class="stat-foot">{$t.diskReserve}</div></div>
 </div>
-{#if error}<div class="notice error" role="alert">{error}</div>{/if}
-{#if notice}<div class="notice success" role="status">{notice} <button class="quiet-button" aria-label={$t.close} onclick={() => { notice = ''; }}><Icon name="x" size={16} /></button></div>{/if}
+<Notification bind:message={error} kind="error" />
+<Notification bind:message={notice} kind="success" />
 <details class="panel torrent-add">
   <summary><Icon name="plus" size={18} /><strong>{$t.add}</strong><span class="add-description">{$t.torrentsDescription}</span><span class="disclosure-chevron"><Icon name="chevron-right" size={18} /></span></summary>
   <form onsubmit={addTorrent}>
     <fieldset class="add-fields" disabled={busy}>
-      <label>{$t.magnetUrl}<input bind:value={source} placeholder="magnet:?xt=urn:btih:…" disabled={busy || !!upload} /></label>
-      <label>{$t.torrentFile}<input type="file" accept=".torrent,application/x-bittorrent" onchange={(e) => { upload = e.currentTarget.files?.[0]; }} /></label>
-      <button class="primary" disabled={busy || (!source.trim() && !upload)}>{busy ? '…' : $t.add}</button>
+      <label>{$t.magnetUrl}<input bind:value={source} placeholder="magnet:?xt=urn:btih:…" disabled={busy || !!upload} onblur={(e) => e.currentTarget.form?.requestSubmit()} /></label>
+      <label>{$t.torrentFile}<input type="file" accept=".torrent,application/x-bittorrent" onchange={(e) => { upload = e.currentTarget.files?.[0]; if (upload) e.currentTarget.form?.requestSubmit(); }} /></label>
+      <button type="submit" class="primary icon-button" title={$t.add} aria-label={$t.add} aria-busy={busy} disabled={busy || (!source.trim() && !upload)}><Icon name="send" /></button>
     </fieldset>
   </form>
 </details>
@@ -82,17 +83,19 @@
 <Modal bind:open={removeOpen} title={deleteData ? $t.delete : $t.remove}>{#if removal}<p><strong>{removal.name}</strong></p><p>{deleteData ? $t.deleteTorrentHelp : $t.removeTorrentHelp}</p><div class="dialog-actions"><button class="secondary" onclick={() => { removeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: deleteData }]} disabled={busy} onclick={() => removal && action(removal, deleteData ? 'delete' : 'remove', deleteData)}>{deleteData ? $t.deletePermanently : $t.remove}</button></div>{/if}</Modal>
 <style>
   .torrent-add{margin-bottom:14px}
-  .torrent-add summary{display:flex;align-items:center;gap:8px;padding:12px 16px;cursor:pointer;list-style:none}
+  .torrent-add summary{display:flex;align-items:center;gap:8px;min-height:48px;padding:12px 16px;background:var(--accent);color:var(--accent-text);border-radius:var(--shape-lg);cursor:pointer;list-style:none}
+  .torrent-add summary:hover{background:color-mix(in srgb,var(--accent) 92%,var(--accent-text))}
   .torrent-add summary::-webkit-details-marker{display:none}
-  .torrent-add summary:focus-visible{outline:3px solid var(--accent-ink);outline-offset:-3px;border-radius:var(--shape-lg)}
-  .add-description{color:var(--muted);font-size:12px}
+  .torrent-add summary:focus-visible{outline:3px solid var(--accent-text);outline-offset:-6px}
+  .add-description{font-size:12px}
   .disclosure-chevron{margin-left:auto;display:flex}
   .torrent-add[open] .disclosure-chevron{transform:rotate(90deg)}
-  .add-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;align-items:end;gap:12px;margin:0;padding:0 16px 14px;border:0;min-width:0}
+  .add-fields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;align-items:end;gap:12px;margin:0;padding:16px;border:0;min-width:0}
   .add-fields label,.add-fields input{min-width:0}
   .add-fields label{font-size:12px;gap:6px}
   .add-fields input{padding:9px 12px;min-height:44px}
-  .add-fields input[type=file]{padding:7px 8px}
+  .add-fields input[type=file]{padding:0;border:0}
+  .add-fields .primary{width:44px;min-height:44px;padding:10px}
   @media(max-width:700px){
     .add-description{display:none}
     .add-fields{grid-template-columns:minmax(0,1fr)}

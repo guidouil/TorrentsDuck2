@@ -16,6 +16,31 @@ function mountTransfers(api = vi.fn().mockResolvedValue({ torrents: [] })) {
 }
 
 describe('inline torrent form', () => {
+  it.each(['', ' \n\t '])('ignores an empty source %j', async (source) => {
+    const transfers = mountTransfers();
+    transfers.input(source);
+    await transfers.addTorrent(transfers.event);
+    expect(transfers.api).not.toHaveBeenCalled();
+    expect(transfers.reset).not.toHaveBeenCalled();
+    expect(transfers.state()).toMatchObject({ source, busy: false, error: '', notice: '' });
+  });
+
+  it('ignores a second submission while the first upload is pending', async () => {
+    let complete!: () => void;
+    const api = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { complete = resolve; })).mockResolvedValue({ torrents: [] });
+    const transfers = mountTransfers(api);
+    transfers.input('magnet:?xt=urn:btih:0123456789012345678901234567890123456789');
+    const pending = transfers.addTorrent(transfers.event);
+    await transfers.addTorrent(transfers.event);
+    expect(api).toHaveBeenCalledOnce();
+    expect(transfers.state().busy).toBe(true);
+    complete();
+    await pending;
+    expect(api.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+    expect(transfers.reset).toHaveBeenCalledOnce();
+    expect(transfers.state().busy).toBe(false);
+  });
+
   it('clears a successful file submission so another file or link can follow', async () => {
     const transfers = mountTransfers();
     const file = new File(['de'], 'first.torrent');
@@ -37,5 +62,20 @@ describe('inline torrent form', () => {
     await transfers.addTorrent(transfers.event);
     expect(transfers.reset).not.toHaveBeenCalled();
     expect(transfers.state()).toMatchObject({ source: 'magnet:invalid', busy: false, error: 'Invalid torrent', notice: '' });
+  });
+
+  it('keeps a rejected file available for a successful retry', async () => {
+    const transfers = mountTransfers(vi.fn().mockRejectedValueOnce(new Error('Upload failed')).mockResolvedValue({ torrents: [] }));
+    const file = new File(['de'], 'retry.torrent');
+    transfers.input('', file);
+    await transfers.addTorrent(transfers.event);
+    expect(transfers.reset).not.toHaveBeenCalled();
+    expect(transfers.state().upload).toBe(file);
+    expect(transfers.state()).toMatchObject({ source: '', busy: false, error: 'Upload failed', notice: '' });
+
+    await transfers.addTorrent(transfers.event);
+    expect(transfers.api.mock.calls[1][1].body.get('torrent').name).toBe('retry.torrent');
+    expect(transfers.reset).toHaveBeenCalledOnce();
+    expect(transfers.state()).toMatchObject({ source: '', upload: undefined, busy: false, error: '', notice: 'Added' });
   });
 });

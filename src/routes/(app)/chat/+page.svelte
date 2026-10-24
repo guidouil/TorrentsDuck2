@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Notification from '#lib/Notification.svelte';
   import Icon from '#lib/Icon.svelte';
   import { onMount, tick } from 'svelte';
   import { api } from '#lib/client.js';
@@ -10,5 +11,5 @@
 </script>
 <svelte:head><title>{$t.chat} · Torrents Duck</title></svelte:head>
 <h1 class="sr-only">{$t.chat}</h1>
-{#if error}<div class="notice error" role="alert">{error}</div>{/if}
+<Notification bind:message={error} kind="error" />
 <section class="panel chat-panel"><div class="chat-messages" bind:this={container} aria-label={$t.messages}>{#if nextCursor}<button class="quiet-button" onclick={() => load(true)}>{$t.previousMessages}</button>{/if}{#if loading}<div class="empty"><p>{$t.loadingPage}</p></div>{:else if !messages.length}<div class="empty"><p>{$t.chatEmpty}</p></div>{/if}{#each messages as message (message.id)}<article class="chat-entry"><span class="avatar">{(message.name || 'D').slice(0, 1).toUpperCase()}</span><div><strong>{message.name}</strong><time datetime={message.createdAt}>{new Date(message.createdAt).toLocaleString($language, { dateStyle: 'short', timeStyle: 'short' })}</time><p>{message.body}</p></div></article>{/each}</div><form class="chat-form" onsubmit={send}><textarea aria-label={$t.message} placeholder={$t.message} bind:value={body} maxlength={2000} rows="1" required></textarea><button class="primary" disabled={busy || !body.trim()} aria-label={$t.send}><span class="send-label">{$t.send}</span><Icon name="send" size={18} /></button></form></section>

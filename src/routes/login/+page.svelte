@@ -6,6 +6,7 @@
   import { t } from '#lib/i18n.js';
   import { api, duration } from '#lib/client.js';
   import QuackLogo from '#lib/QuackLogo.svelte';
+  import Notification from '#lib/Notification.svelte';
 
   let identifier = $state(''); let password = $state(''); let error = $state(''); let busy = $state(false); let reset = $state(false); let email = $state(''); let sent = $state(false);
   let phone = $state(false); let phoneBusy = $state(false); let qrImage = $state(''); let userCode = $state(''); let remaining = $state(0);
@@ -92,7 +93,7 @@
   <section class="auth-card">
     <QuackLogo />
     <h1>{phone ? $t.deviceLogin : reset ? $t.resetPassword : $t.login}</h1>
-    {#if error}<div class="notice error" role="alert">{error}</div>{/if}
+    <Notification bind:message={error} kind="error" />
     {#if phone}
       <div class="device-login">
         {#if phoneBusy}<p role="status">{$t.creating}</p>
@@ -109,8 +110,8 @@
       </div>
     {:else}
       {#if returnCode && !reset}<p class="subtitle">{$t.deviceSignInFirst}</p>{/if}
-      {#if sent}<div class="notice success" role="status">{$t.resetSent}</div>
-      {:else}
+      <Notification message={sent ? $t.resetSent : ''} kind="success" />
+      {#if !sent}
         <form class="form-stack" onsubmit={submit}>
           {#if reset}<label>{$t.email}<input type="email" required bind:value={email} autocomplete="email" /></label>
           {:else}<label>{$t.identifier}<input required bind:value={identifier} autocomplete="username" /></label><label>{$t.password}<input type="password" required bind:value={password} autocomplete="current-password" maxlength={1024} /></label>{/if}

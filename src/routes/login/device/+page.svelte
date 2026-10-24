@@ -3,6 +3,7 @@
   import { api } from '#lib/client.js';
   import { t } from '#lib/i18n.js';
   import QuackLogo from '#lib/QuackLogo.svelte';
+  import Notification from '#lib/Notification.svelte';
   let { data } = $props();
   let busy = $state(false); let ready = $state(false); let error = $state(''); let result = $state<'approved' | 'denied' | ''>('');
   let stopped = false;
@@ -50,7 +51,7 @@
       <p class="subtitle">{$t.deviceAccount} <strong>{data.user?.username}</strong></p>
       <div class="device-code">{data.userCode}</div>
       <p class="security-help">{$t.deviceSecurity}</p>
-      {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+      <Notification bind:message={error} kind="error" />
       <div class="form-stack">
         {#if ready}
           <button class="primary" disabled={busy} onclick={() => decide(true)}>{busy ? $t.signingIn : $t.deviceApprove}</button>
