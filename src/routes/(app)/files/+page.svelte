@@ -19,6 +19,7 @@
   let videoOpen = $state(false); let video = $state<Entry | null>(null); let linkOpen = $state(false); let link = $state<any>(null);
   let ftpsOpen = $state(false);
   let requestNumber = 0;
+  const fileIcon = (name: string) => /\.(mp4|m4v|webm|ogv|mkv|mov|avi|mpeg|mpg|wmv|flv|m2ts|mts|vob|3gp)$/i.test(name) ? 'video-file' : /\.(mp3|m4a|ogg|oga|flac|wav|aac|opus|aiff|aif|wma|ape|alac)$/i.test(name) ? 'audio-file' : 'file';
   const fileUrl = (entry: Entry, inline = false) => `/api/files/download?${new URLSearchParams({ space, path: entry.path, ...(inline ? { inline: '1' } : {}) })}`;
   async function loadFiles() { const number = ++requestNumber; loading = true; error = ''; try { const result = await api(`/api/files?${new URLSearchParams({ space, path, search: query, sort, offset: String(offset), limit: '50' })}`); if (number !== requestNumber) return; entries = result.entries; total = result.total; } catch (e) { if (number === requestNumber) error = (e as Error).message; } finally { if (number === requestNumber) loading = false; } }
   $effect(() => { space; path; query; sort; offset; void loadFiles(); });
@@ -71,7 +72,7 @@
       <tbody role="rowgroup">
         {#each entries as entry (entry.path)}
           <tr role="row">
-            <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" disabled={busy} onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name="file" /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
+            <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" disabled={busy} onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name={fileIcon(entry.name)} /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.size}</span>{entry.directory ? '—' : bytes(entry.size)}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.date}</span>{new Date(entry.modifiedAt).toLocaleDateString($language)}</td>
             <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={18} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => { video = entry; videoOpen = true; }}><Icon name="play" size={18} /><span class="action-label">{$t.play}</span></button><button class="icon-button" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="share" size={18} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={18} /><span class="action-label">{$t.rename}</span></button><button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={18} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
@@ -133,12 +134,12 @@
     .explorer-panel{min-height:calc(100dvh - 180px)}
   }
   @media(max-width:700px){
-    .explorer-toolbar{gap:8px}
+    .explorer-toolbar{gap:8px;padding:8px 0}
     .tabs{width:100%}
     .tabs button{flex:1;min-width:0;min-height:44px;padding:8px}
     .explorer-toolbar .search{max-width:none;min-width:120px;min-height:44px}
     .explorer-toolbar select{min-height:44px}
-    .explorer-location{gap:4px;padding:4px 8px}
+    .explorer-location{gap:4px;padding:4px 0}
     .breadcrumbs{flex-basis:100%}
     .breadcrumbs button{min-height:44px}
     .file-actions{justify-content:flex-start}
@@ -146,8 +147,8 @@
     .table-wrap{overflow:visible}
     table,tbody{display:block;width:100%}
     thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-    tbody{padding:8px;display:grid;gap:8px}
-    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px;background:var(--surface-container);border:0;border-radius:var(--shape-md)}
+    tbody{padding:0;display:grid;gap:0}
+    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:12px 0;background:transparent;border:0;border-bottom:1px solid var(--line);border-radius:0}
     td{padding:0;border:0;min-width:0;font-size:12px}
     .name-cell,.actions-cell{grid-column:1/-1}
     .file-link{align-items:flex-start}

@@ -14,7 +14,7 @@
   async function updateUser(update = change) { if (!update) return; busy = true; error = ''; try { if (update.delete) { await api(`/api/admin/users/${encodeURIComponent(update.user.id)}`, { method: 'DELETE', body: JSON.stringify({ confirm: true }) }); } else { await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ id: update.user.id, ...(update.approved !== undefined ? { approved: update.approved } : {}), ...(update.enabled !== undefined ? { enabled: update.enabled } : {}), ...(update.role ? { role: update.role } : {}) }) }); } changeOpen = false; await load(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
 </script>
 <svelte:head><title>{$t.admin} · Torrents Duck</title></svelte:head>
-<div class="page-heading"><h1>{$t.admin}</h1><span class="badge">{users.length} {$t.members.toLocaleLowerCase()}</span></div>
+<h1 class="sr-only">{$t.admin}</h1>
 {#if error}<div class="notice error" role="alert">{error}</div>{/if}
 <section class="stat-card backup-card">
   <h2>{$t.backup}</h2>
@@ -32,7 +32,7 @@
   <div class="toolbar">
     <input class="search" type="search" placeholder={$t.search} aria-label={$t.search} bind:value={query} />
     <div class="spacer"></div>
-    <span class="badge">{$t.members}</span>
+    <span class="badge">{users.length} {$t.members.toLocaleLowerCase()}</span>
   </div>
   {#if loading}
     <div class="empty"><p>{$t.loadingPage}</p></div>
@@ -102,5 +102,10 @@
     .members-table .member-actions{grid-column:1/-1;border-top:1px solid var(--line);padding-top:12px}
     .row-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
     .row-actions button{min-height:44px;padding:10px 14px;text-align:center;font-size:13px;overflow-wrap:anywhere}
+  }
+  @media(max-width:700px){
+    .members-wrap{padding:0}
+    .members-table tbody{gap:0}
+    .members-table tbody tr{padding:12px 0;background:transparent;border-bottom:1px solid var(--line);border-radius:0}
   }
 </style>

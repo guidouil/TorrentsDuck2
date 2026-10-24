@@ -12,18 +12,29 @@ function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedVa
     page: { url: new URL(url), shallow: shallowUrl ? { url: new URL(shallowUrl) } : null },
     $state: (value: unknown) => value, $derived: (value: unknown) => value, $effect: () => {}
   };
-  runInNewContext(transpile(`${script}\nglobalThis.explorer = { browse, enter, switchSpace, loadFiles, state: () => ({ space, path, query, sort, offset, entries, loading, error }) };`), context);
+  runInNewContext(transpile(`${script}\nglobalThis.explorer = { browse, enter, switchSpace, loadFiles, fileIcon, state: () => ({ space, path, query, sort, offset, entries, loading, error }) };`), context);
   return { api, goto, ...context.explorer as {
     browse: (values: Record<string, string>, replace?: boolean) => void;
     enter: (path: string) => void;
     switchSpace: (space: string) => void;
     loadFiles: () => Promise<void>;
+    fileIcon: (name: string) => string;
     state: () => { space: string; path: string; query: string; sort: string; offset: number; entries: unknown[]; loading: boolean; error: string };
   } };
 }
 
 const origin = 'https://duck.example.com/files';
 const shared = `${origin}?space=share&path=Films%2F%C3%89t%C3%A9+2026&search=version+longue&sort=size&offset=50`;
+
+describe('file type icons', () => {
+  it.each([
+    ['film.mp4', 'video-file'], ['film.MKV', 'video-file'], ['film.webm', 'video-file'], ['film.mpeg', 'video-file'],
+    ['musique.mp3', 'audio-file'], ['musique.FLAC', 'audio-file'], ['musique.wav', 'audio-file'], ['musique.m4a', 'audio-file'], ['musique.opus', 'audio-file'],
+    ['document.pdf', 'file'], ['image.jpg', 'file'], ['archive.zip', 'file'], ['notes.mp4.txt', 'file'], ['README', 'file'], ['source.ts', 'file']
+  ])('uses %s → %s', (name, expected) => {
+    expect(explorer(origin).fileIcon(name)).toBe(expected);
+  });
+});
 
 describe('file explorer URL navigation', () => {
   it.each([undefined, shared])('loads a bookmarked or shallow URL with all its explorer state (%s)', async (shallowUrl) => {

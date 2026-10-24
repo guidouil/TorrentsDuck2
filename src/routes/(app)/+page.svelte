@@ -32,7 +32,7 @@
   const stateLabel = (state: string, progress: number) => /error|missing/i.test(state) ? $t.stateError : stopped(state) ? $t.statePaused : progress >= 1 ? $t.stateSharing : /stalled/i.test(state) ? $t.stateWaiting : $t.downloading;
 </script>
 <svelte:head><title>{$t.transfers} · Torrents Duck</title></svelte:head>
-<div class="page-heading"><h1>{$t.transfers}</h1></div>
+<h1 class="sr-only">{$t.transfers}</h1>
 <div class="stat-grid">
   <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="download" size={16} /></span> {$t.downloading}</div><div class="stat-value">{bytes(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((s, x) => s + x.downloadSpeed, 0))}<small> /s</small></div><div class="stat-foot">{torrents.filter((x) => x.progress < 1 && !stopped(x.state)).length} {$t.activeTransfers}</div></div>
   <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="upload" size={16} /></span> {$t.uploadingLabel}</div><div class="stat-value">{bytes(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((s, x) => s + x.uploadSpeed, 0))}<small> /s</small></div></div>
@@ -51,7 +51,7 @@
     </fieldset>
   </form>
 </details>
-<section class="panel" aria-label={$t.transfers}>
+<section class="panel transfers-panel" aria-label={$t.transfers}>
   <div class="toolbar"><input class="search" aria-label={$t.search} placeholder={$t.search} bind:value={query} oninput={() => { currentPage = 1; }} /><select aria-label={$t.sort} bind:value={sort} onchange={() => { currentPage = 1; }}><option value="progress">{$t.progress}</option><option value="name">{$t.name}</option><option value="speed">{$t.speed}</option></select><div class="spacer"></div><label class="check-label"><input type="checkbox" bind:checked={mine} onchange={() => { currentPage = 1; }} />{$t.mine}</label><select aria-label={$t.transferCount} bind:value={limit} onchange={() => { currentPage = 1; }}><option value={25}>25 / page</option><option value={50}>50 / page</option><option value={100}>100 / page</option></select></div>
   {#if loading}
     <div class="empty"><p>{$t.loading}</p></div>
@@ -70,7 +70,7 @@
               <td class="progress-cell" role="cell"><span class="mobile-label" aria-hidden="true">{$t.progress}</span><div class="progress-caption"><span>{(torrent.progress * 100).toFixed(0)} %</span><span>{#if torrent.progress < 1}{duration(torrent.eta)}{:else}<Icon name="check" size={14} />{/if}</span></div><div class="progress" role="progressbar" aria-label={torrent.name} aria-valuenow={Math.round(torrent.progress * 100)} aria-valuemin={0} aria-valuemax={100}><span style:width={`${torrent.progress * 100}%`}></span></div></td>
               <td role="cell"><span class="mobile-label" aria-hidden="true">{$t.speed}</span><span class="transfer-speed accent"><Icon name="download" size={14} />{bytes(torrent.downloadSpeed)}/s</span><small class="transfer-speed muted"><Icon name="upload" size={14} />{bytes(torrent.uploadSpeed)}/s</small></td>
               <td role="cell"><span class="mobile-label" aria-hidden="true">{$t.state}</span><span class={['badge', { good: torrent.progress >= 1 && !stopped(torrent.state), bad: /error|missing/i.test(torrent.state) }]}>{stateLabel(torrent.state, torrent.progress)}</span></td>
-              <td class="actions-cell" role="cell"><div class="row-actions"><button class="icon-button" disabled={busy} title={stopped(torrent.state) ? $t.resume : $t.pause} aria-label={stopped(torrent.state) ? $t.resume : $t.pause} onclick={() => action(torrent, stopped(torrent.state) ? 'start' : 'stop')}><Icon name={stopped(torrent.state) ? 'play' : 'pause'} size={18} /><span class="action-label">{stopped(torrent.state) ? $t.resume : $t.pause}</span></button><button class="icon-button" disabled={busy} title={$t.remove} aria-label={$t.remove} onclick={() => askRemove(torrent, false)}><Icon name="minus-circle" size={18} /><span class="action-label">{$t.remove}</span></button><button class="icon-button danger" disabled={busy} title={$t.delete} aria-label={$t.delete} onclick={() => askRemove(torrent, true)}><Icon name="trash" size={18} /><span class="action-label">{$t.delete}</span></button></div></td>
+              <td class="actions-cell" role="cell"><div class="row-actions"><button class="icon-button" disabled={busy} title={stopped(torrent.state) ? $t.resume : $t.pause} aria-label={stopped(torrent.state) ? $t.resume : $t.pause} onclick={() => action(torrent, stopped(torrent.state) ? 'start' : 'stop')}><Icon name={stopped(torrent.state) ? 'play' : 'pause'} size={18} /><span class="action-label">{stopped(torrent.state) ? $t.resume : $t.pause}</span></button><button class="icon-button warning" disabled={busy} title={$t.remove} aria-label={$t.remove} onclick={() => askRemove(torrent, false)}><Icon name="x" size={18} /><span class="action-label">{$t.removeShort}</span></button><button class="icon-button danger" disabled={busy} title={$t.delete} aria-label={$t.delete} onclick={() => askRemove(torrent, true)}><Icon name="trash" size={18} /><span class="action-label">{$t.deleteShort}</span></button></div></td>
             </tr>
           {/each}
         </tbody>
@@ -132,10 +132,14 @@
     .panel-bottom{flex-wrap:wrap;gap:16px}
     .pagination{margin-left:auto}
   }
-  @media(max-width:400px){
-    tbody{padding:10px;gap:10px}
-    tr{padding:10px;gap:10px}
-    .row-actions{gap:6px}
-    .row-actions .icon-button{padding:9px 7px;font-size:12px}
+  @media(max-width:700px){
+    .transfers-panel{background:transparent;border-radius:0;overflow:visible}
+    tbody{padding:0;gap:0}
+    tr{padding:12px 0;gap:10px;background:transparent;border-radius:0}
+    tr+tr{border-top:1px solid var(--line)}
+    .file-glyph{width:20px;height:20px;background:transparent;border-radius:0}
+    .row-actions{flex-wrap:nowrap;gap:6px;padding-top:0;border-top:0}
+    .row-actions .icon-button{flex:1;min-width:0;gap:4px;padding:8px 4px;font-size:12px}
+    .action-label{white-space:nowrap}
   }
 </style>
