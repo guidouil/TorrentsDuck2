@@ -28,6 +28,7 @@ export const POST: RequestHandler = async (event) => {
     const { rows: [updated] } = await client.query('UPDATE "user" SET enabled=COALESCE($2,enabled),role=COALESCE($3,role),approved=COALESCE($4,approved),"updatedAt"=now() WHERE id=$1 RETURNING id,username,email,role,enabled,approved,"createdAt"', [id, body.enabled ?? null, body.role ?? null, body.approved ?? null]);
     if (body.enabled === false || body.approved === false) {
       await client.query('DELETE FROM session WHERE "userId"=$1', [id]);
+      await client.query('DELETE FROM "deviceCode" WHERE "userId"=$1', [id]);
       await client.query('UPDATE playback_tokens SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL', [id]);
     }
     await client.query('INSERT INTO audit_log(user_id,action,target,details) VALUES ($1,\'user.update\',$2,$3)', [admin.id, id, JSON.stringify({ enabled: updated.enabled, approved: updated.approved, role: updated.role })]);

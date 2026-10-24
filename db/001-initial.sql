@@ -63,6 +63,20 @@ CREATE TABLE IF NOT EXISTS verification (
 );
 CREATE INDEX IF NOT EXISTS verification_identifier ON verification (identifier);
 
+CREATE TABLE IF NOT EXISTS "deviceCode" (
+  id text PRIMARY KEY,
+  "deviceCode" text NOT NULL UNIQUE,
+  "userCode" text NOT NULL UNIQUE,
+  "userId" text REFERENCES "user"(id) ON DELETE CASCADE,
+  "expiresAt" timestamptz NOT NULL,
+  status text NOT NULL CHECK (status IN ('pending', 'approved', 'denied')),
+  "lastPolledAt" timestamptz,
+  "pollingInterval" integer,
+  "clientId" text,
+  scope text
+);
+CREATE INDEX IF NOT EXISTS device_code_expiration ON "deviceCode" ("expiresAt");
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id text REFERENCES "user"(id) ON DELETE SET NULL,

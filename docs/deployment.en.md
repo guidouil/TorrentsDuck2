@@ -170,6 +170,7 @@ Before opening access to members:
 - In a private browser window, check that lists, downloads and playback are denied; `/_protected/...` and `/api/internal/ftp-auth` must return 404 from the Internet.
 - Test registration, the waiting page, first administrator verification, email delivery and member approval. After an import, check accounts, permissions, an accented username, email sign-in, password hash upgrade, password reset and revocation.
 - Add an authorized public test torrent; check progress, stop/resume, persistence after restart and both deletion modes. Test search, sorting, pagination, chat and SSE reconnection.
+- In a signed-out browser, display the login QR code and scan it with a phone. Check that signing in on the phone returns to confirmation, compare the codes, explicitly approve, and verify that the first browser signs in automatically. Also test denial and expiry after five minutes; pending or disabled accounts must not be able to approve a device. Use the same HTTPS site address on both devices.
 - Test video seeking, a VLC link, its revocation and expiration, and a format unsupported by the browser.
 - In FileZilla/Cyberduck, require **explicit FTP over TLS**, using the certificate hostname and port `21000`. Check downloads, writes to `share` and denial of writes to `downloads`. Reject plain FTP and unencrypted data channels.
 - Disable a connected member: all FTPS sessions must close within a few seconds, and the revoked account must fail to reconnect. Unavailability of the internal API must also close sessions.

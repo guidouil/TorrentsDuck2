@@ -6,6 +6,8 @@ Torrents Duck 2 est la suite de [TorrentsDuck](https://github.com/guidouil/Torre
 
 L’inscription est libre ; chaque nouveau compte reste sur une page d’attente, sans accès aux services, jusqu’à sa validation par un administrateur. L’adresse configurée dans `ADMIN_EMAIL` reçoit automatiquement le rôle administrateur à son inscription ; ses accès s’activent après confirmation de son adresse par mail.
 
+Pour connecter une télé sans y saisir son mot de passe, choisir « Se connecter avec mon téléphone » sur la page de connexion. Scanner le QR code, se connecter sur le téléphone si nécessaire, comparer le code affiché sur les deux écrans puis autoriser la connexion. Le QR code expire après cinq minutes et ne peut servir qu’une fois. N’autoriser que les demandes lancées sur son propre appareil ; le navigateur de la télé reste connecté jusqu’à sa déconnexion ou l’expiration de sa session. Les deux appareils doivent pouvoir accéder à la même adresse du site (HTTPS en production).
+
 ## Docker local
 
 Avec Docker, Compose et npm disponibles, lancer depuis la racine du dépôt :

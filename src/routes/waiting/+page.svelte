@@ -40,14 +40,23 @@
   }
 </script>
 <svelte:head><title>{verificationRequired ? $t.verifyEmail : $t.waiting} · Torrents Duck</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
-<main style="min-height:100vh;display:grid;place-content:center;gap:24px;text-align:center;padding:24px">
-  <div style="display:flex;justify-content:center"><QuackLogo /></div>
-  <h1>{verificationRequired ? $t.verifyEmail : $t.waiting}</h1>
-  {#if verificationRequired}
-    <p>{$t.verificationHelp}<br /><strong>{data.user?.email}</strong></p>
-    {#if sent}<p class="notice success" role="status">{$t.verificationSent}</p>{/if}
-    <button class="primary" disabled={busy} onclick={resendVerification}>{$t.resendVerification}</button>
-  {/if}
-  {#if error || verificationError}<p class="inline-error" role="alert">{error || verificationError}</p>{/if}
-  <button class="secondary" disabled={busy} onclick={logout}>{$t.logout}</button>
+<main class="auth-page">
+  <section class="auth-card waiting-card">
+    <QuackLogo />
+    <h1>{verificationRequired ? $t.verifyEmail : $t.waiting}</h1>
+    {#if verificationRequired}
+      <p class="subtitle">{$t.verificationHelp}<br /><strong>{data.user?.email}</strong></p>
+      {#if sent}<p class="notice success" role="status">{$t.verificationSent}</p>{/if}
+      <button class="primary" disabled={busy} onclick={resendVerification}>{$t.resendVerification}</button>
+    {/if}
+    {#if error || verificationError}<p class="notice error" role="alert">{error || verificationError}</p>{/if}
+    <button class="secondary" disabled={busy} onclick={logout}>{$t.logout}</button>
+  </section>
 </main>
+
+<style>
+  .waiting-card { text-align: center; }
+  .waiting-card :global(.brand) { margin-inline: auto; }
+  .waiting-card strong { overflow-wrap: anywhere; }
+  .waiting-card > button { width: 100%; margin-top: 16px; }
+</style>

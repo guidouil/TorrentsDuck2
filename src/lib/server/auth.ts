@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
-import { APIError, createAuthMiddleware } from 'better-auth/api';
-import { username } from 'better-auth/plugins';
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
+import { setSessionCookie } from 'better-auth/cookies';
+import { deviceAuthorization, username } from 'better-auth/plugins';
 import { db, query } from './db';
 import { checkPassword, hashPassword, LEGACY_PREFIX } from './passwords';
 import { sendResetEmail, sendVerificationEmail } from './mail';
@@ -58,7 +59,10 @@ export const auth = betterAuth({
     revokeSessionsOnPasswordReset: true,
     password: { hash: hashPassword, verify: verifyAndUpgradePassword },
     sendResetPassword: async ({ user, url }) => sendResetEmail(user.email, url),
-    onPasswordReset: async ({ user }) => audit(user.id, 'user.password-reset')
+    onPasswordReset: async ({ user }) => {
+      await query('DELETE FROM "deviceCode" WHERE "userId"=$1', [user.id]);
+      await audit(user.id, 'user.password-reset');
+    }
   },
   emailVerification: {
     sendVerificationEmail: async ({ user, url }) => sendVerificationEmail(user.email, url),
@@ -84,17 +88,32 @@ export const auth = betterAuth({
     usernameNormalization: false,
     displayUsernameNormalization: false,
     usernameValidator: (value) => value.trim().length > 0 && !/[\x00-\x1f\x7f]/.test(value)
+  }), deviceAuthorization({
+    verificationUri: '/login/device',
+    expiresIn: '5m',
+    interval: '5s',
+    validateClient: (clientId) => clientId === 'torrents-duck-tv'
   })],
   disabledPaths: ['/sign-up/email', '/is-username-available', '/update-user', '/delete-user', '/change-email'],
   databaseHooks: {
-    session: { create: { before: async (session) => {
-      const [user] = await query<{ enabled: boolean }>('SELECT enabled FROM "user" WHERE id=$1', [session.userId]);
-      if (!user?.enabled) throw new APIError('UNAUTHORIZED', { message: 'Invalid credentials' });
+    session: { create: { before: async (session, ctx) => {
+      const [user] = await query<{ enabled: boolean; approved: boolean }>('SELECT enabled,approved FROM "user" WHERE id=$1', [session.userId]);
+      if (!user?.enabled || (ctx?.path === '/device/token' && !user.approved)) throw new APIError('UNAUTHORIZED', { message: 'Invalid credentials' });
       return { data: session };
     } } }
   },
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === '/device/code') {
+        if (ctx.body?.user_id !== undefined || ctx.body?.scope !== undefined) throw new APIError('BAD_REQUEST', { message: 'Unsupported device authorization fields' });
+        await query('DELETE FROM "deviceCode" WHERE "expiresAt" < now()');
+      }
+      if (ctx.path === '/device' || ctx.path === '/device/approve' || ctx.path === '/device/deny') {
+        const session = await getSessionFromCtx(ctx);
+        if (!session) throw new APIError('UNAUTHORIZED', { message: 'Authentication required' });
+        const [user] = await query<{ enabled: boolean; approved: boolean }>('SELECT enabled,approved FROM "user" WHERE id=$1', [session.user.id]);
+        if (!user?.enabled || !user.approved) throw new APIError('FORBIDDEN', { message: 'Active approved account required' });
+      }
       if (ctx.path === '/sign-in/email' || ctx.path === '/sign-in/username') {
         const identifier = ctx.path === '/sign-in/email' ? ctx.body?.email : ctx.body?.username;
         const user = typeof identifier === 'string' ? await findByIdentifier(identifier) : null;
@@ -102,8 +121,10 @@ export const auth = betterAuth({
       }
     }),
     after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === '/device/token' && ctx.context.newSession) await setSessionCookie(ctx, ctx.context.newSession);
       const result = ctx.context.returned;
       if (ctx.path === '/change-password' && result && typeof result === 'object' && 'user' in result && ctx.context.session?.user) {
+        await query('DELETE FROM "deviceCode" WHERE "userId"=$1', [ctx.context.session.user.id]);
         await audit(ctx.context.session.user.id, 'user.password-change');
       }
     })

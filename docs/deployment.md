@@ -169,6 +169,7 @@ Avant ouverture aux membres :
 
 - En navigation privée, vérifier le refus des listes, téléchargements et lectures ; `/_protected/...` et `/api/internal/ftp-auth` doivent retourner 404 depuis Internet.
 - Tester inscription, attente, confirmation du premier administrateur, réception des mails et validation d'un membre. En cas d'import, vérifier les comptes, droits, pseudo accentué, connexion par e-mail, renouvellement du hash, réinitialisation et révocation.
+- Sur un navigateur déconnecté, afficher le QR code de connexion et le scanner depuis un téléphone. Vérifier le retour à la confirmation après connexion du téléphone, la comparaison du code, l’autorisation explicite puis la connexion automatique du premier navigateur. Tester aussi le refus et l’expiration après cinq minutes ; un compte en attente ou désactivé ne doit pas pouvoir autoriser un appareil. Utiliser la même adresse HTTPS sur les deux appareils.
 - Ajouter un torrent public autorisé, vérifier progression, arrêt/reprise, persistance après redémarrage et les deux modes de suppression. Tester recherche, tri, pagination, chat et reconnexion SSE.
 - Tester la lecture vidéo avec déplacement, un lien VLC, sa révocation et son expiration, ainsi qu'un format non lu par le navigateur.
 - Dans FileZilla/Cyberduck, choisir **FTP avec TLS explicite obligatoire**, le nom du certificat et le port `21000`. Vérifier téléchargement, écriture dans `share` et refus d'écriture dans `downloads`. Refuser le FTP en clair et les canaux de données non chiffrés.

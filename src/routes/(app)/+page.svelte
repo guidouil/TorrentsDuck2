@@ -70,7 +70,7 @@
   <div class="panel-bottom"><span>{filtered.length} {$t.transfers.toLocaleLowerCase()} <span class="muted">·</span> <span class="loading-indicator"><span class="tiny-dot"></span>{connected ? $t.live : $t.connecting}</span></span><div class="pagination"><button aria-label={$t.previousPage} disabled={currentPage <= 1} onclick={() => currentPage--}><Icon name="chevron-left" size={18} /></button><span>{currentPage} / {pages}</span><button aria-label={$t.nextPage} disabled={currentPage >= pages} onclick={() => currentPage++}><Icon name="chevron-right" size={18} /></button></div></div>
 </section>
 <Modal bind:open={addOpen} title={$t.add}><form onsubmit={addTorrent} class="form-stack"><p>{$t.torrentsDescription}</p><label>{$t.magnetUrl}<input bind:value={source} placeholder="magnet:?xt=urn:btih:…" disabled={!!upload} /></label><div class="dropzone"><label>{$t.torrentFile}<input type="file" accept=".torrent,application/x-bittorrent" onchange={(e) => { upload = e.currentTarget.files?.[0]; }} /></label></div>{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button class="secondary" type="button" onclick={() => { addOpen = false; }}>{$t.cancel}</button><button class="primary" disabled={busy || (!source.trim() && !upload)}>{busy ? '…' : $t.add}</button></div></form></Modal>
-<Modal bind:open={removeOpen} title={deleteData ? $t.delete : $t.remove}>{#if removal}<p><strong>{removal.name}</strong></p><p>{deleteData ? $t.deleteTorrentHelp : $t.removeTorrentHelp}</p><div class="dialog-actions"><button class="secondary" onclick={() => { removeOpen = false; }}>{$t.cancel}</button><button class="primary" disabled={busy} onclick={() => removal && action(removal, deleteData ? 'delete' : 'remove', deleteData)}>{deleteData ? $t.deletePermanently : $t.remove}</button></div>{/if}</Modal>
+<Modal bind:open={removeOpen} title={deleteData ? $t.delete : $t.remove}>{#if removal}<p><strong>{removal.name}</strong></p><p>{deleteData ? $t.deleteTorrentHelp : $t.removeTorrentHelp}</p><div class="dialog-actions"><button class="secondary" onclick={() => { removeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: deleteData }]} disabled={busy} onclick={() => removal && action(removal, deleteData ? 'delete' : 'remove', deleteData)}>{deleteData ? $t.deletePermanently : $t.remove}</button></div>{/if}</Modal>
 <style>
   table{table-layout:fixed}
   th:nth-child(2){width:18%}
@@ -90,18 +90,18 @@
     table,tbody{display:block;width:100%}
     thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
     tbody{padding:12px;display:grid;gap:12px}
-    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:16px;background:var(--bg);border:1px solid var(--line);border-radius:12px}
+    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:16px;background:var(--surface-container);border:0;border-radius:var(--shape-lg)}
     td{padding:0;border:0;min-width:0}
     .name-cell,.progress-cell,.actions-cell{grid-column:1/-1}
     .torrent-name{max-width:none;align-items:flex-start}
     .torrent-name strong{white-space:normal;overflow-wrap:anywhere;font-size:14px;line-height:1.5}
-    .torrent-name small{font-size:11px;margin-top:5px}
-    .mobile-label{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}
+    .torrent-name small{font-size:12px;margin-top:5px}
+    .mobile-label{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}
     .progress-caption{font-size:12px}
     .progress{height:6px}
-    .badge{font-size:11px;white-space:normal;line-height:1.4}
+    .badge{white-space:normal;line-height:1.4}
     .row-actions{justify-content:flex-start;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
-    .row-actions .icon-button{padding:10px;font-size:12px;min-height:44px;background:var(--panel);border:1px solid var(--line)}
+    .row-actions .icon-button{padding:10px 14px;font-size:13px;min-height:44px}
     .action-label{display:inline}
     .panel-bottom{flex-wrap:wrap;gap:16px}
     .pagination{margin-left:auto}
@@ -110,6 +110,6 @@
     tbody{padding:10px;gap:10px}
     tr{padding:12px;gap:14px}
     .row-actions{gap:6px}
-    .row-actions .icon-button{flex:1;padding:9px 7px;font-size:11px}
+    .row-actions .icon-button{padding:9px 7px;font-size:12px}
   }
 </style>

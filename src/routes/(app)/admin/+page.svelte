@@ -69,7 +69,7 @@
     </div>
   {/if}
 </section>
-<Modal bind:open={changeOpen} title={change?.delete ? $t.deleteAccount : $t.changePermissions}>{#if change}<p>{change.delete ? $t.confirmDeleteAccount : $t.confirmPermissions} <strong>{change.user.username}</strong> ?</p>{#if change.delete}<p>{$t.deleteAccountHelp}</p>{:else if change.enabled === false}<p>{$t.revokeWeb}</p>{/if}{#if change.delete || change.enabled === false}<p>{$t.ftpsDisconnect}</p>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button class="secondary" onclick={() => { changeOpen = false; }}>{$t.cancel}</button><button class="primary" disabled={busy} onclick={() => updateUser()}>{change.delete ? $t.deletePermanently : $t.confirm}</button></div>{/if}</Modal>
+<Modal bind:open={changeOpen} title={change?.delete ? $t.deleteAccount : $t.changePermissions}>{#if change}<p>{change.delete ? $t.confirmDeleteAccount : $t.confirmPermissions} <strong>{change.user.username}</strong> ?</p>{#if change.delete}<p>{$t.deleteAccountHelp}</p>{:else if change.enabled === false}<p>{$t.revokeWeb}</p>{/if}{#if change.delete || change.enabled === false}<p>{$t.ftpsDisconnect}</p>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button class="secondary" onclick={() => { changeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: change.delete || change.enabled === false }]} disabled={busy} onclick={() => updateUser()}>{change.delete ? $t.deletePermanently : $t.confirm}</button></div>{/if}</Modal>
 
 <style>
   .backup-card{margin-bottom:24px}
@@ -84,24 +84,23 @@
   .members-table th:nth-child(6){width:26%}
   .members-table td{overflow-wrap:anywhere}
   .row-actions{flex-wrap:wrap;justify-content:flex-start;gap:4px}
-  .row-actions button{font-size:12px;min-height:38px;text-align:left}
+  .row-actions button{font-size:12px;text-align:left}
   .mobile-label{display:none}
   @media(max-width:1100px){
     .members-wrap{padding:12px;overflow:visible}
     .members-table,.members-table tbody{display:block}
     .members-table thead{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
     .members-table tbody{display:grid;gap:12px}
-    .members-table tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 16px;padding:16px;background:var(--bg);border:1px solid var(--line);border-radius:10px}
+    .members-table tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 16px;padding:16px;background:var(--surface-container);border:0;border-radius:var(--shape-lg)}
     .members-table td{display:block;min-width:0;padding:0;border:0;font-size:13px}
     .members-table .member-name{grid-column:1;grid-row:1;align-self:center;font-size:15px}
     .members-table .member-state{grid-column:2;grid-row:1;align-self:center;text-align:right}
     .members-table .member-email{grid-column:1/-1}
     .members-table .member-since,.members-table .member-role{display:grid;gap:5px}
-    .mobile-label{display:block;font-size:10px;color:var(--muted)}
+    .mobile-label{display:block;font-size:12px;color:var(--muted)}
     .member-state .badge{white-space:normal;text-align:center;max-width:120px}
     .members-table .member-actions{grid-column:1/-1;border-top:1px solid var(--line);padding-top:12px}
     .row-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-    .row-actions button{min-height:44px;padding:10px;border:1px solid var(--line);background:var(--panel);text-align:center;overflow-wrap:anywhere}
-    .row-actions button:hover{background:var(--panel-hover);color:var(--text)}
+    .row-actions button{min-height:44px;padding:10px 14px;text-align:center;font-size:13px;overflow-wrap:anywhere}
   }
 </style>

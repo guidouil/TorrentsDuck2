@@ -56,8 +56,8 @@
   </div>
 {/if}
 <div class="panel-bottom"><span>{total} {$t.items} · {$t.ftpsPort}</span><div class="pagination"><button aria-label={$t.previous} disabled={offset === 0} onclick={() => { offset = Math.max(0, offset - 50); }}><Icon name="chevron-left" size={18} /></button><span>{Math.floor(offset / 50) + 1} / {Math.max(1, Math.ceil(total / 50))}</span><button aria-label={$t.next} disabled={offset + 50 >= total} onclick={() => { offset += 50; }}><Icon name="chevron-right" size={18} /></button></div></div></section>
-<Modal bind:open={dialogOpen} title={operation === 'mkdir' ? $t.newFolder : operation === 'rename' ? $t.rename : $t.delete}><form onsubmit={mutate} class="form-stack">{#if operation === 'delete'}<p>{$t.deleteFileBefore} {selected?.name} {$t.deleteFileAfter}</p>{:else}<label>{$t.name}<input required bind:value={newName} maxlength={240} /></label>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button type="button" class="secondary" onclick={() => { dialogOpen = false; }}>{$t.cancel}</button><button class="primary" disabled={busy}>{operation === 'delete' ? $t.deletePermanently : $t.save}</button></div></form></Modal>
-<Modal bind:open={videoOpen} title={video?.name ?? $t.play} wide={true}>{#if video && videoOpen}<video class="video-player" controls preload="metadata" src={fileUrl(video, true)}><track kind="captions" />{$t.browserUnsupported}</video><p>{$t.playbackHelp}</p><div class="dialog-actions"><a class="button secondary" href={fileUrl(video)}>{$t.download}</a><button class="primary" onclick={() => video && makeLink(video)}>{$t.share}</button></div>{/if}</Modal>
+<Modal bind:open={dialogOpen} title={operation === 'mkdir' ? $t.newFolder : operation === 'rename' ? $t.rename : $t.delete}><form onsubmit={mutate} class="form-stack">{#if operation === 'delete'}<p>{$t.deleteFileBefore} {selected?.name} {$t.deleteFileAfter}</p>{:else}<label>{$t.name}<input required bind:value={newName} maxlength={240} /></label>{/if}{#if error}<p class="inline-error" role="alert">{error}</p>{/if}<div class="dialog-actions"><button type="button" class="secondary" onclick={() => { dialogOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: operation === 'delete' }]} disabled={busy}>{operation === 'delete' ? $t.deletePermanently : $t.save}</button></div></form></Modal>
+<Modal bind:open={videoOpen} title={video?.name ?? $t.play} wide={true}>{#if video && videoOpen}<video class="video-player" controls preload="metadata" src={fileUrl(video, true)} onloadedmetadata={(event) => { event.currentTarget.muted = false; event.currentTarget.volume = 1; }}><track kind="captions" />{$t.browserUnsupported}</video><p>{$t.playbackHelp}</p><div class="dialog-actions"><a class="button secondary" href={fileUrl(video)}>{$t.download}</a><button class="primary" onclick={() => video && makeLink(video)}>{$t.share}</button></div>{/if}</Modal>
 <Modal bind:open={linkOpen} title={$t.share}>{#if link}<p>{$t.linkExpires} {new Date(link.expiresAt).toLocaleString($language)}. {$t.linkPrivate}</p><div class="token-box">{link.url}</div><div class="dialog-actions"><button class="secondary danger" onclick={revoke}>{$t.revoke}</button><button class="secondary" onclick={copyLink}>{$t.copy}</button><button class="primary" onclick={downloadPlaylist}>{$t.vlcPlaylist}</button></div>{/if}</Modal>
 <Modal bind:open={ftpsOpen} title={$t.ftpsTitle}>
   <p>{$t.ftpsInstructions}</p>
@@ -92,16 +92,16 @@
     table,tbody{display:block;width:100%}
     thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
     tbody{padding:12px;display:grid;gap:12px}
-    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:16px;background:var(--bg);border:1px solid var(--line);border-radius:12px}
+    tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;padding:16px;background:var(--surface-container);border:0;border-radius:var(--shape-lg)}
     td{padding:0;border:0;min-width:0}
     .name-cell,.actions-cell{grid-column:1/-1}
     .file-link{max-width:none;align-items:flex-start}
     .truncate{white-space:normal;overflow-wrap:anywhere;font-size:14px;line-height:1.5}
-    .mobile-label{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}
+    .mobile-label{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}
     .row-actions{justify-content:flex-start;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
     .row-actions:empty{display:none}
     .actions-cell:has(.row-actions:empty){display:none}
-    .row-actions .icon-button{padding:10px;font-size:12px;min-height:44px;background:var(--panel);border:1px solid var(--line)}
+    .row-actions .icon-button{padding:10px 14px;font-size:13px;min-height:44px}
     .action-label{display:inline}
     .panel-bottom{flex-wrap:wrap;gap:16px}
     .pagination{margin-left:auto}
@@ -110,12 +110,12 @@
     .page-heading{flex-wrap:wrap}
     .file-actions{justify-content:flex-start;width:100%}
     .file-actions button{flex:1}
-    .tabs button{flex:1;min-width:0;padding:12px 8px}
+    .tabs button{flex:1 1 auto;min-width:0;padding:12px 8px}
   }
   @media(max-width:400px){
     tbody{padding:10px;gap:10px}
     tr{padding:12px;gap:14px}
     .row-actions{gap:6px}
-    .row-actions .icon-button{padding:9px 7px;font-size:11px}
+    .row-actions .icon-button{padding:9px 7px;font-size:12px}
   }
 </style>

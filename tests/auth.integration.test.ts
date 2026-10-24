@@ -30,6 +30,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
   let pendingId = '';
   let pendingCookie = '';
   let schemaReady = false;
+  const deviceCodes: string[] = [];
 
   function event<Route extends NonNullable<RequestEvent['route']['id']>>(path: Route, body?: unknown, sessionCookie = '', internal = false): RequestEvent<{ id: string }, Route> {
     const headers = new Headers({ origin });
@@ -46,6 +47,29 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     const response = await authModule.auth.api.signInEmail({ body: { email: loginEmail, password }, headers: new Headers({ origin }), asResponse: true });
     expect(response.status).toBe(200);
     return response.headers.getSetCookie().map((part) => part.split(';')[0]).join('; ');
+  }
+
+  function deviceRequest(path: string, body?: unknown, sessionCookie = ''): Promise<Response> {
+    return authModule.auth.handler(new Request(`${origin}/api/auth${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { origin, 'content-type': 'application/json', cookie: sessionCookie },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }));
+  }
+
+  async function createDevice() {
+    const response = await deviceRequest('/device/code', { client_id: 'torrents-duck-tv' });
+    expect(response.status).toBe(200);
+    const device = await response.json() as { device_code: string; user_code: string; verification_uri: string; verification_uri_complete: string; expires_in: number; interval: number };
+    deviceCodes.push(device.device_code);
+    return device;
+  }
+
+  async function approveDevice(sessionCookie: string) {
+    const device = await createDevice();
+    expect((await deviceRequest(`/device?user_code=${device.user_code}`, undefined, sessionCookie)).status).toBe(200);
+    expect((await deviceRequest('/device/approve', { userCode: device.user_code }, sessionCookie)).status).toBe(200);
+    return device;
   }
 
   beforeAll(async () => {
@@ -69,6 +93,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
       await db.query('INSERT INTO account(id,"accountId","providerId","userId",password) VALUES ($1,$2,\'credential\',$2,$3)', [randomUUID(), id, stored]);
     }
     authModule = await import('../src/lib/server/auth');
+    // Better Auth skips origin checks in test mode unless explicitly restored.
+    (await authModule.auth.$context).skipOriginCheck = false;
     adminRoutes = await import('../src/routes/api/admin/users/+server');
     registration = await import('../src/routes/api/registration/+server');
     ftpRoute = await import('../src/routes/api/internal/ftp-auth/+server');
@@ -81,6 +107,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     if (!db) return;
     try {
       if (schemaReady) {
+        await db.query('DELETE FROM "deviceCode" WHERE "deviceCode"=ANY($1::text[])', [deviceCodes]);
         await db.query('DELETE FROM messages WHERE body=$1', [prefix]);
         await db.query('DELETE FROM torrent_authors WHERE hash=$1', [createHash('sha256').update(prefix).digest('hex').slice(0, 40)]);
         await db.query('DELETE FROM audit_log WHERE user_id IN (SELECT id FROM "user" WHERE id=ANY($1::text[]) OR username=ANY($2::text[]))', [[adminId, memberId, ftpId], registeredUsernames]);
@@ -101,6 +128,83 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     const user = await authModule.requireMember(event('/api/files', undefined, cookie));
     expect(user.username).toBe(username);
     expect(user.emailVerified).toBe(false);
+  });
+
+  it('signs the TV browser in once only after a member explicitly approves its QR code', async () => {
+    for (const body of [
+      { client_id: 'unknown-client' },
+      { client_id: 'torrents-duck-tv', user_id: memberId },
+      { client_id: 'torrents-duck-tv', scope: 'admin' }
+    ]) expect((await deviceRequest('/device/code', body)).status).toBe(400);
+    const device = await createDevice();
+    expect(device).toMatchObject({ expires_in: 300, interval: 5, verification_uri: `${origin}/login/device` });
+    expect(new URL(device.verification_uri_complete).searchParams.get('user_code')).toBe(device.user_code);
+    expect(device.verification_uri_complete).not.toContain(device.device_code);
+    expect((await deviceRequest(`/device?user_code=${device.user_code}`)).status).toBe(401);
+    expect((await deviceRequest('/device/approve', { userCode: device.user_code })).status).toBe(401);
+    const body = { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: 'torrents-duck-tv' };
+    expect(await (await deviceRequest('/device/token', { ...body, device_code: device.user_code })).json()).toMatchObject({ error: 'invalid_grant' });
+    expect(await (await deviceRequest('/device/token', { ...body, client_id: 'unknown-client' })).json()).toMatchObject({ error: 'invalid_grant' });
+    const waiting = await deviceRequest('/device/token', body);
+    expect(waiting.status).toBe(400);
+    expect(await waiting.json()).toMatchObject({ error: 'authorization_pending' });
+    expect(waiting.headers.getSetCookie()).toEqual([]);
+    expect(await (await deviceRequest('/device/token', body)).json()).toMatchObject({ error: 'slow_down' });
+    expect((await deviceRequest(`/device?user_code=${device.user_code}`, undefined, cookie)).status).toBe(200);
+    expect((await deviceRequest('/device/approve', { userCode: device.user_code }, adminCookie)).status).toBe(403);
+    expect((await deviceRequest('/device/approve', { userCode: device.user_code }, cookie)).status).toBe(200);
+    await db.query('UPDATE "deviceCode" SET "lastPolledAt"=NULL WHERE "deviceCode"=$1', [device.device_code]);
+    const foreignOrigin = await authModule.auth.handler(new Request(`${origin}/api/auth/device/token`, {
+      method: 'POST', headers: { origin: 'https://untrusted.example.org', 'content-type': 'application/json', cookie }, body: JSON.stringify(body)
+    }));
+    expect(foreignOrigin.status).toBe(403);
+    expect(foreignOrigin.headers.getSetCookie()).toEqual([]);
+    const responses = await Promise.all([deviceRequest('/device/token', body), deviceRequest('/device/token', body)]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 400]);
+    const success = responses.find((response) => response.status === 200)!;
+    expect(success.headers.getSetCookie().join(';')).toContain('HttpOnly');
+    const tvCookie = success.headers.getSetCookie().map((part) => part.split(';')[0]).join('; ');
+    expect((await authModule.requireMember(event('/api/files', undefined, tvCookie))).id).toBe(memberId);
+    expect((await deviceRequest('/device/token', body)).status).toBe(400);
+  });
+
+  it('refuses QR approval and session creation when member access is withdrawn', async () => {
+    const device = await createDevice();
+    try {
+      await db.query('UPDATE "user" SET enabled=false WHERE id=$1', [memberId]);
+      expect((await deviceRequest(`/device?user_code=${device.user_code}`, undefined, cookie)).status).toBe(403);
+      await db.query('UPDATE "user" SET enabled=true,approved=false WHERE id=$1', [memberId]);
+      expect((await deviceRequest(`/device?user_code=${device.user_code}`, undefined, cookie)).status).toBe(403);
+      for (const path of ['/device/approve', '/device/deny']) {
+        expect((await deviceRequest(path, { userCode: device.user_code }, cookie)).status).toBe(403);
+      }
+      await db.query('UPDATE "user" SET enabled=true,approved=true WHERE id=$1', [memberId]);
+      expect((await deviceRequest(`/device?user_code=${device.user_code}`, undefined, cookie)).status).toBe(200);
+      expect((await deviceRequest('/device/approve', { userCode: device.user_code }, cookie)).status).toBe(200);
+      await db.query('UPDATE "user" SET approved=false WHERE id=$1', [memberId]);
+      const before = await db.query('SELECT count(*)::integer AS count FROM session WHERE "userId"=$1', [memberId]);
+      const response = await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: 'torrents-duck-tv' });
+      expect(response.status).toBe(401);
+      expect(response.headers.getSetCookie()).toEqual([]);
+      expect((await db.query('SELECT count(*)::integer AS count FROM session WHERE "userId"=$1', [memberId])).rows).toEqual(before.rows);
+    } finally {
+      await db.query('UPDATE "user" SET enabled=true,approved=true WHERE id=$1', [memberId]);
+    }
+  });
+
+  it('rejects denied and expired QR codes and cleans expired requests on issuance', async () => {
+    const denied = await createDevice();
+    expect((await deviceRequest(`/device?user_code=${denied.user_code}`, undefined, cookie)).status).toBe(200);
+    expect((await deviceRequest('/device/deny', { userCode: denied.user_code }, cookie)).status).toBe(200);
+    const response = await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: denied.device_code, client_id: 'torrents-duck-tv' });
+    expect(await response.json()).toMatchObject({ error: 'access_denied' });
+    expect(response.headers.getSetCookie()).toEqual([]);
+    const expired = await createDevice();
+    await db.query('UPDATE "deviceCode" SET "expiresAt"=now()-interval \'1 second\' WHERE "deviceCode"=$1', [expired.device_code]);
+    expect((await deviceRequest(`/device?user_code=${expired.user_code}`, undefined, cookie)).status).toBe(400);
+    expect((await deviceRequest('/device/approve', { userCode: expired.user_code }, cookie)).status).toBe(400);
+    await createDevice();
+    expect((await db.query('SELECT id FROM "deviceCode" WHERE "deviceCode"=$1', [expired.device_code])).rows).toEqual([]);
   });
 
   it('uses the same legacy upgrade over private FTPS authentication and rejects the wrong secret', async () => {
@@ -233,9 +337,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     const policyRoute = await import('../src/routes/api/internal/ftp-policy/+server');
     const before = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
     const token = randomBytes(32).toString('base64url');
+    const device = await approveDevice(pendingCookie);
     await db.query('INSERT INTO playback_tokens(token_hash,user_id,space,path,expires_at) VALUES ($1,$2,\'downloads\',\'test.mp4\',now()+interval \'1 day\')', [createHash('sha256').update(token).digest('hex'), pendingId]);
     const response = await adminRoutes.POST(event('/api/admin/users', { id: pendingId, approved: false }, adminCookie));
     expect((await response.json()).user).toMatchObject({ enabled: true, approved: false });
+    expect(await (await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: 'torrents-duck-tv' })).json()).toMatchObject({ error: 'invalid_grant' });
     await expect(authModule.requireMember(event('/api/files', undefined, pendingCookie))).rejects.toMatchObject({ status: 401 });
     pendingCookie = await login(`${prefix}+public@example.org`);
     await expect(authModule.requireMember(event('/api/files', undefined, pendingCookie))).rejects.toMatchObject({ status: 403 });
@@ -252,12 +358,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
   it('resets a password, revokes existing sessions and spends the reset token once', async () => {
     const policyRoute = await import('../src/routes/api/internal/ftp-policy/+server');
     const before = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
+    const device = await approveDevice(cookie);
     await authModule.auth.api.requestPasswordReset({ body: { email, redirectTo: `${origin}/reset-password` }, headers: new Headers({ origin }) });
     expect(mail.reset).toHaveBeenCalled();
     const resetUrl = new URL(mail.reset.mock.calls.at(-1)![1]);
     const token = resetUrl.pathname.split('/').at(-1)!;
     const newPassword = 'Un autre mot de passe 🦆 2026';
     await authModule.auth.api.resetPassword({ body: { token, newPassword } });
+    expect(await (await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: 'torrents-duck-tv' })).json()).toMatchObject({ error: 'invalid_grant' });
     expect(await authModule.verifyCredentials(email, password)).toBeNull();
     expect((await authModule.verifyCredentials(email, newPassword))?.id).toBe(memberId);
     await expect(authModule.requireMember(event('/api/files', undefined, cookie))).rejects.toMatchObject({ status: 401 });
@@ -270,7 +378,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     const policyRoute = await import('../src/routes/api/internal/ftp-policy/+server');
     const before = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
     const replacement = 'Nouveau mot de passe admin 🦆';
+    const device = await approveDevice(adminCookie);
+    await expect(authModule.auth.api.changePassword({ body: { currentPassword: 'wrong', newPassword: replacement }, headers: new Headers({ origin, cookie: adminCookie }) })).rejects.toBeDefined();
+    expect((await db.query('SELECT id FROM "deviceCode" WHERE "deviceCode"=$1', [device.device_code])).rows).toHaveLength(1);
     await authModule.auth.api.changePassword({ body: { currentPassword: password, newPassword: replacement, revokeOtherSessions: false }, headers: new Headers({ origin, cookie: adminCookie }) });
+    expect(await (await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: 'torrents-duck-tv' })).json()).toMatchObject({ error: 'invalid_grant' });
     expect(await authModule.verifyCredentials(`${prefix}+admin@example.org`, password)).toBeNull();
     expect((await authModule.verifyCredentials(`${prefix}+admin@example.org`, replacement))?.id).toBe(adminId);
     const after = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
@@ -278,9 +390,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
   });
 
   it('disables access immediately for web, FTPS and temporary playback links', async () => {
+    const device = await approveDevice(await login(`${prefix}+ftp@example.org`));
     await db.query('INSERT INTO playback_tokens(token_hash,user_id,space,path,expires_at) VALUES ($1,$2,\'downloads\',\'test.mp4\',now()+interval \'1 day\')', [createHash('sha256').update(prefix).digest('hex'), ftpId]);
     const response = await adminRoutes.POST(event('/api/admin/users', { id: ftpId, enabled: false }, adminCookie));
     expect(response.status).toBe(200);
+    expect(await (await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: 'torrents-duck-tv' })).json()).toMatchObject({ error: 'invalid_grant' });
     expect(await authModule.verifyCredentials(`${prefix}-ftp`, password)).toBeNull();
     await expect(ftpRoute.POST(event('/api/internal/ftp-auth', { username: `${prefix}-ftp`, password }, '', true))).rejects.toMatchObject({ status: 401 });
     const { rows: [link] } = await db.query('SELECT revoked_at FROM playback_tokens WHERE user_id=$1', [ftpId]);
