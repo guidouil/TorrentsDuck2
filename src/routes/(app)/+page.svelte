@@ -4,7 +4,7 @@
   import { api, bytes, duration } from '#lib/client.js';
   import { language, t } from '#lib/i18n.js';
   import MetricGauge from '#lib/MetricGauge.svelte';
-  import { MAX_BANDWIDTH, megabits, diskPercent, chartPoints } from '#lib/transfer-metrics.js';
+  import { transferSpeed, diskPercent, chartPoints } from '#lib/transfer-metrics.js';
   import Modal from '#lib/Modal.svelte';
   import Icon from '#lib/Icon.svelte';
   let { data } = $props();
@@ -14,9 +14,10 @@
   let services = $state<{ id: string; cpuPercent: number | null }[]>([]);
   let lastSample = $state(0);
   let history = $state<{ download: number; upload: number }[]>([]);
+  let peaks = $state({ download: 0, upload: 0 });
   const serviceNames = [{ id: 'web', name: 'Web' }, { id: 'qbittorrent', name: 'qBittorrent' }, { id: 'postgres', name: 'PostgreSQL' }, { id: 'nginx', name: 'Nginx' }, { id: 'ftp', name: 'FTPS' }];
-  const downloadSpeed = $derived(lastSample ? megabits(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.downloadSpeed, 0)) : null);
-  const uploadSpeed = $derived(lastSample ? megabits(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.uploadSpeed, 0)) : null);
+  const downloadSpeed = $derived(lastSample ? transferSpeed(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.downloadSpeed, 0)) : null);
+  const uploadSpeed = $derived(lastSample ? transferSpeed(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.uploadSpeed, 0)) : null);
   const diskUsage = $derived(diskPercent(storage));
   let loading = $state(true); let connected = $state(false); let error = $state(''); let notice = $state('');
   let query = $state(''); let mine = $state(false); let sort = $state('progress'); let limit = $state(25); let currentPage = $state(1);
@@ -30,10 +31,11 @@
     if (value.sampledAt !== undefined && value.sampledAt < lastSample) return;
     torrents = value.torrents ?? []; currentPage = Math.min(currentPage, pages);
     stats = value.stats ?? {}; storage = value.storage ?? {}; services = value.metrics?.services ?? [];
+    peaks = { download: transferSpeed(stats.downloadPeak ?? 0) ?? 0, upload: transferSpeed(stats.uploadPeak ?? 0) ?? 0 };
     const time = value.sampledAt ?? Date.now();
     if (time > lastSample) {
-      const download = megabits(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.downloadSpeed, 0));
-      const upload = megabits(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.uploadSpeed, 0));
+      const download = transferSpeed(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.downloadSpeed, 0));
+      const upload = transferSpeed(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.uploadSpeed, 0));
       if (download !== null && upload !== null) history = [...history.slice(-39), { download, upload }];
       lastSample = time;
     }
@@ -56,25 +58,31 @@
 </script>
 <svelte:head><title>{$t.transfers} · Torrents Duck</title></svelte:head>
 <h1 class="sr-only">{$t.transfers}</h1>
-{#snippet activity(values: number[])}
+{#snippet activity(values: number[], maximum: number)}
   <svg class="activity-chart" viewBox="0 0 240 36" preserveAspectRatio="none" aria-hidden="true" focusable="false">
     <path class="chart-grid" d="M0 2H240 M0 17H240 M0 32H240" />
     {#if values.length > 1}
-      <polygon points={`0,36 ${chartPoints(values, MAX_BANDWIDTH)} 240,36`} />
-      <polyline points={chartPoints(values, MAX_BANDWIDTH)} />
+      <polygon points={`0,36 ${chartPoints(values, maximum)} 240,36`} />
+      <polyline points={chartPoints(values, maximum)} />
     {/if}
   </svg>
 {/snippet}
 <div class="stat-grid transfer-stats">
   <section class="stat-card metric-card network-card" aria-label={$t.downloading}>
-    <div class="stat-label"><span class="metric-icon"><Icon name="download" size={17} /></span><span>{$t.downloading}</span><span class="metric-cap">{MAX_BANDWIDTH}<span class="cap-unit"> Mbit/s</span></span></div>
-    <MetricGauge value={downloadSpeed} maximum={MAX_BANDWIDTH} unit="Mbit/s" label={$t.downloading} />
-    {@render activity(history.map((sample) => sample.download))}
+    <div class="stat-label"><span class="metric-icon"><Icon name="download" size={17} /></span><span>{$t.downloading}</span><span class="metric-cap" title={$t.bandwidthPeakHelp}>{bytes(peaks.download)}/s</span></div>
+    <MetricGauge value={downloadSpeed} maximum={peaks.download} unit="o/s" label={$t.downloading} />
+    {@render activity(history.map((sample) => sample.download), peaks.download)}
   </section>
   <section class="stat-card metric-card upload-card" aria-label={$t.uploadingLabel}>
-    <div class="stat-label"><span class="metric-icon"><Icon name="upload" size={17} /></span><span>{$t.uploadingLabel}</span><span class="metric-cap">{MAX_BANDWIDTH}<span class="cap-unit"> Mbit/s</span></span></div>
-    <MetricGauge value={uploadSpeed} maximum={MAX_BANDWIDTH} unit="Mbit/s" label={$t.uploadingLabel} />
-    {@render activity(history.map((sample) => sample.upload))}
+    <div class="stat-label"><span class="metric-icon"><Icon name="upload" size={17} /></span><span>{$t.uploadingLabel}</span><span class="metric-cap" title={$t.bandwidthPeakHelp}>{bytes(peaks.upload)}/s</span></div>
+    <MetricGauge value={uploadSpeed} maximum={peaks.upload} unit="o/s" label={$t.uploadingLabel} />
+    {@render activity(history.map((sample) => sample.upload), peaks.upload)}
+  </section>
+  <section class={['stat-card metric-card disk-card', { 'disk-warning': diskUsage !== null && diskUsage >= 80, 'disk-danger': diskUsage !== null && diskUsage >= 90 }]} aria-label={$t.primaryDisk}>
+    <div class="stat-label"><span class="metric-icon"><Icon name="disk" size={17} /></span><span>{$t.primaryDisk}</span></div>
+    <MetricGauge value={diskUsage} unit="%" label={$t.primaryDisk} />
+    <div class="disk-capacity">{diskUsage === null ? '— / —' : `${bytes(storage.used ?? storage.total - storage.available)} / ${bytes(storage.total)}`}</div>
+    <div class="disk-segments" aria-hidden="true">{#each { length: 40 } as _, index (index)}<span class={{ filled: diskUsage !== null && index < diskUsage / 2.5, reserve: index >= 36 }}></span>{/each}</div>
   </section>
   <section class="stat-card metric-card services-card" aria-label={$t.serviceLoad}>
     <div class="stat-label"><span class="metric-icon"><Icon name="settings" size={17} /></span><span>{$t.serviceLoad}</span><span class="metric-cap" title={$t.serviceCpuHelp}>CPU</span></div>
@@ -87,11 +95,6 @@
         </div>
       {/each}
     </div>
-  </section>
-  <section class={['stat-card metric-card disk-card', { 'disk-warning': diskUsage !== null && diskUsage >= 80, 'disk-danger': diskUsage !== null && diskUsage >= 90 }]} aria-label={$t.primaryDisk} title={storage.total ? `${bytes(storage.used ?? storage.total - storage.available)} / ${bytes(storage.total)}` : $t.metricUnavailable}>
-    <div class="stat-label"><span class="metric-icon"><Icon name="disk" size={17} /></span><span>{$t.primaryDisk}</span><span class="metric-cap">{$t.diskUsed}</span></div>
-    <MetricGauge value={diskUsage} unit="%" label={$t.primaryDisk} />
-    <div class="disk-segments" aria-hidden="true">{#each { length: 40 } as _, index (index)}<span class={{ filled: diskUsage !== null && index < diskUsage / 2.5, reserve: index >= 36 }}></span>{/each}</div>
   </section>
 </div>
 <Notification bind:message={error} kind="error" />
@@ -143,7 +146,7 @@
   .disk-card{--chart-color:light-dark(#926326,#e5c18c)}
   .disk-warning{--chart-color:var(--warning)}
   .disk-danger{--chart-color:var(--danger)}
-  .metric-card .stat-label{gap:7px;margin-bottom:10px;white-space:nowrap;font-weight:500}
+  .metric-card .stat-label{gap:7px;margin-bottom:10px;white-space:nowrap;font-weight:500;flex-wrap:wrap}
   .metric-icon{display:flex;color:var(--chart-color)}
   .metric-cap{margin-left:auto;font-size:10px;color:var(--muted);font-weight:400}
   .activity-chart{display:block;width:100%;height:30px;margin-top:12px;overflow:visible;color:var(--chart-color)}
@@ -156,7 +159,8 @@
   .service-reading small{font-weight:400;color:var(--muted);font-size:10px}
   .service-track{height:4px;border-radius:var(--shape-full);background:var(--surface-container-highest);overflow:hidden}
   .service-track span{display:block;height:100%;background:var(--chart-color);border-radius:inherit;transition:width .6s ease}
-  .disk-segments{display:flex;gap:3px;height:22px;margin-top:20px;align-items:center}
+  .disk-capacity{text-align:center;margin-top:8px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .disk-segments{display:flex;gap:3px;height:22px;margin-top:8px;align-items:center}
   .disk-segments span{flex:1;height:14px;min-width:0;border-radius:2px;background:var(--surface-container-highest)}
   .disk-segments .reserve{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warning) 50%,transparent)}
   .disk-segments .filled{background:var(--chart-color)}
@@ -169,7 +173,6 @@
     .service-meters{gap:8px}
     .disk-segments{gap:2px}
   }
-  @media(max-width:400px){.cap-unit,.disk-card .metric-cap{display:none}}
   @media(prefers-reduced-motion:reduce){.service-track span{transition:none}}
 
   .torrent-add{margin-bottom:14px}

@@ -16,7 +16,9 @@ beforeEach(() => {
 	mocked.authors.mockReset().mockResolvedValue(undefined);
 	mocked.storage.mockReset().mockResolvedValue({ total: 100, available: 50, reserved: 10, usable: 40, canDownload: true });
 	mocked.member.mockReset().mockResolvedValue({ id: 'member', enabled: true });
-	mocked.query.mockReset().mockResolvedValue([{ hash: 'a'.repeat(40), user_id: 'member' }]);
+	mocked.query.mockReset().mockImplementation(async (sql: string, values: number[] = []) => sql.includes('bandwidth_peaks')
+		? [{ download: values[0] ?? 0, upload: values[1] ?? 0 }]
+		: [{ hash: 'a'.repeat(40), user_id: 'member' }]);
 	mocked.metrics.mockReset().mockResolvedValue({ cpuCount: 4, services: [{ id: 'web', cpuPercent: 12.5 }] });
 });
 afterEach(() => { vi.useRealTimers(); });
@@ -32,6 +34,32 @@ describe('shared live snapshot', () => {
 		expect(a.sampledAt).toBe(Date.now());
 		expect(a.metrics).toEqual({ cpuCount: 4, services: [{ id: 'web', cpuPercent: 12.5 }] });
 		expect(mocked.metrics).toHaveBeenCalledOnce();
+		expect(a.stats).toMatchObject({ downloadPeak: 2, uploadPeak: 3 });
+		expect(mocked.query.mock.calls.filter(([sql]) => sql.startsWith('INSERT INTO bandwidth_peaks'))).toHaveLength(1);
+	});
+	it('loads persisted maxima after a restart without writing lower or equal speeds', async () => {
+		mocked.query.mockImplementation(async (sql: string) => sql.includes('bandwidth_peaks') ? [{ download: 50_000_000, upload: 10_000_000 }] : []);
+		const { torrentSnapshot } = await import('../src/lib/server/torrent-stream');
+		expect((await torrentSnapshot()).stats).toMatchObject({ downloadPeak: 50_000_000, uploadPeak: 10_000_000 });
+		mocked.qbt.mockResolvedValue(new Response(JSON.stringify({ dl_info_speed: 50_000_000, up_info_speed: 10_000_000 })));
+		await torrentSnapshot(true);
+		expect(mocked.query.mock.calls.some(([sql]) => sql.startsWith('INSERT INTO bandwidth_peaks'))).toBe(false);
+	});
+	it('returns the atomic database maxima when one direction exceeds its record', async () => {
+		mocked.qbt.mockResolvedValue(new Response(JSON.stringify({ dl_info_speed: 60_000_000, up_info_speed: 1_000_000 })));
+		mocked.query.mockImplementation(async (sql: string) => sql.startsWith('SELECT download')
+			? [{ download: 50_000_000, upload: 10_000_000 }]
+			: sql.startsWith('INSERT INTO bandwidth_peaks') ? [{ download: 70_000_000, upload: 10_000_000 }] : []);
+		const { torrentSnapshot } = await import('../src/lib/server/torrent-stream');
+		expect((await torrentSnapshot()).stats).toMatchObject({ downloadPeak: 70_000_000, uploadPeak: 10_000_000 });
+		expect(mocked.query).toHaveBeenCalledWith(expect.stringContaining('GREATEST(bandwidth_peaks.download, EXCLUDED.download)'), [60_000_000, 1_000_000]);
+		expect(mocked.query).toHaveBeenCalledWith(expect.stringContaining('GREATEST(bandwidth_peaks.upload, EXCLUDED.upload)'), expect.any(Array));
+	});
+	it.each([-1, 1.5, null, '1000', Number.MAX_SAFE_INTEGER + 1])('does not persist invalid engine speeds: %s', async (speed) => {
+		mocked.qbt.mockResolvedValue(new Response(JSON.stringify({ dl_info_speed: speed, up_info_speed: speed })));
+		const { torrentSnapshot } = await import('../src/lib/server/torrent-stream');
+		expect((await torrentSnapshot()).stats).toMatchObject({ downloadPeak: 0, uploadPeak: 0 });
+		expect(mocked.query.mock.calls.some(([sql]) => sql.startsWith('INSERT INTO bandwidth_peaks'))).toBe(false);
 	});
 	it('pauses incomplete transfers before the reserve is consumed, without resuming completed seeders', async () => {
 		mocked.storage.mockResolvedValue({ total: 100, available: 10, reserved: 10, usable: 0, canDownload: false });
@@ -57,6 +85,13 @@ describe('shared live snapshot', () => {
 		stopTorrentMonitor();
 		await vi.advanceTimersByTimeAsync(10_000);
 		expect(mocked.list).toHaveBeenCalledTimes(2);
+	});
+	it('protects the disk reserve even when reading persisted peaks fails', async () => {
+		mocked.storage.mockResolvedValue({ canDownload: false });
+		mocked.query.mockRejectedValue(new Error('database unavailable'));
+		const { torrentSnapshot } = await import('../src/lib/server/torrent-stream');
+		await expect(torrentSnapshot()).rejects.toThrow('database unavailable');
+		expect(mocked.qbt).toHaveBeenCalledWith('torrents/stop', expect.any(URLSearchParams));
 	});
 	it('terminates a logged-out live stream on the next authentication check', async () => {
 		const { subscribeTorrents } = await import('../src/lib/server/torrent-stream');

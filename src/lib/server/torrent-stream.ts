@@ -17,6 +17,15 @@ async function loadSnapshot() {
 		const active = raw.filter((torrent) => torrent.progress < 1 && !/^(stopped|paused)/.test(torrent.state));
 		if (active.length) await qbt('torrents/stop', new URLSearchParams({ hashes: active.map((torrent) => torrent.hash).join('|') }));
 	}
+	const savedPeaks = await query<{ download: number; upload: number }>('SELECT download::double precision AS download, upload::double precision AS upload FROM bandwidth_peaks WHERE id = true');
+	let peaks = savedPeaks[0] ?? { download: 0, upload: 0 };
+	const download = Number.isSafeInteger(transfer.dl_info_speed) && transfer.dl_info_speed > 0 ? transfer.dl_info_speed : 0;
+	const upload = Number.isSafeInteger(transfer.up_info_speed) && transfer.up_info_speed > 0 ? transfer.up_info_speed : 0;
+	if (download > peaks.download || upload > peaks.upload) {
+		[peaks] = await query<{ download: number; upload: number }>(`INSERT INTO bandwidth_peaks (id, download, upload) VALUES (true, $1, $2)
+			ON CONFLICT (id) DO UPDATE SET download = GREATEST(bandwidth_peaks.download, EXCLUDED.download), upload = GREATEST(bandwidth_peaks.upload, EXCLUDED.upload)
+			RETURNING download::double precision AS download, upload::double precision AS upload`, [download, upload]);
+	}
 	await syncAuthors(raw);
 	const authors = new Map((await query<{ hash: string; user_id: string | null }>('SELECT hash,user_id FROM torrent_authors')).map((row) => [row.hash, row.user_id]));
 	const torrents = raw.map((torrent) => ({
@@ -29,6 +38,7 @@ async function loadSnapshot() {
 		sampledAt: Date.now(), metrics,
 		torrents, stats: {
 			downloadSpeed: transfer.dl_info_speed, uploadSpeed: transfer.up_info_speed,
+			downloadPeak: peaks.download, uploadPeak: peaks.upload,
 			downloaded: transfer.dl_info_data, uploaded: transfer.up_info_data,
 			connection: transfer.connection_status, count: torrents.length
 		}, storage: { ...storage, pausedForStorage: !storage.canDownload }

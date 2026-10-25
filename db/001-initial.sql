@@ -96,6 +96,12 @@ CREATE TABLE IF NOT EXISTS torrent_authors (
   user_id text REFERENCES "user"(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS bandwidth_peaks (
+  id boolean PRIMARY KEY DEFAULT true CHECK (id),
+  download bigint NOT NULL DEFAULT 0 CHECK (download >= 0),
+  upload bigint NOT NULL DEFAULT 0 CHECK (upload >= 0)
+);
+INSERT INTO bandwidth_peaks DEFAULT VALUES ON CONFLICT (id) DO NOTHING;
 CREATE TABLE IF NOT EXISTS playback_tokens (
   id text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   token_hash text NOT NULL UNIQUE,

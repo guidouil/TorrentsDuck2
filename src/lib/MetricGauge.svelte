@@ -1,17 +1,21 @@
 <script lang="ts">
   import { language } from '#lib/i18n.js';
+  import { bytes } from '#lib/client.js';
   let { value, maximum = 100, unit, label }: { value: number | null; maximum?: number; unit: string; label: string } = $props();
-  const percent = $derived(value === null ? 0 : Math.min(100, Math.max(0, value / maximum * 100)));
-  const formatted = $derived(value === null ? '—' : value.toLocaleString($language, { maximumFractionDigits: 1 }));
+  const percent = $derived(value === null || maximum <= 0 ? 0 : Math.min(100, Math.max(0, value / maximum * 100)));
+  const byteReading = $derived(bytes(value ?? 0).split(' '));
+  const formatted = $derived(value === null ? '—' : unit === 'o/s' ? byteReading[0] : value.toLocaleString($language, { maximumFractionDigits: 1 }));
+  const displayedUnit = $derived(unit === 'o/s' ? `${byteReading[1]}/s` : unit);
+  const formattedMaximum = $derived(unit === 'o/s' ? `${bytes(maximum)}/s` : `${maximum.toLocaleString($language, { maximumFractionDigits: 1 })} ${unit}`);
 </script>
 
-<div class="gauge" role="img" aria-label={`${label}: ${formatted} ${unit} / ${maximum} ${unit}`}>
+<div class="gauge" role="img" aria-label={`${label}: ${formatted} ${displayedUnit} / ${formattedMaximum}`}>
   <svg viewBox="0 0 200 110" aria-hidden="true" focusable="false">
     <path class="ticks" d="M14 100 A86 86 0 0 1 186 100" pathLength="100" />
     <path class="track" d="M28 100 A72 72 0 0 1 172 100" pathLength="100" />
     <path class={['fill', { unknown: value === null }]} d="M28 100 A72 72 0 0 1 172 100" pathLength="100" stroke-dasharray={`${percent} 100`} />
   </svg>
-  <div class="reading" aria-hidden="true"><strong>{formatted}</strong><span>{unit}</span></div>
+  <div class="reading" aria-hidden="true"><strong>{formatted}</strong><span>{displayedUnit}</span></div>
 </div>
 
 <style>

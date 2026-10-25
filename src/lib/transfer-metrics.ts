@@ -1,7 +1,5 @@
-export const MAX_BANDWIDTH = 200;
-
-export function megabits(bytesPerSecond: number): number | null {
-  return Number.isFinite(bytesPerSecond) && bytesPerSecond >= 0 ? bytesPerSecond * 8 / 1_000_000 : null;
+export function transferSpeed(bytesPerSecond: number): number | null {
+  return Number.isFinite(bytesPerSecond) && bytesPerSecond >= 0 ? bytesPerSecond : null;
 }
 
 export function diskPercent(storage: { total?: number; used?: number; available?: number }): number | null {
@@ -12,5 +10,5 @@ export function diskPercent(storage: { total?: number; used?: number; available?
 }
 
 export function chartPoints(values: number[], maximum: number): string {
-  return values.map((value, index) => `${values.length === 1 ? 240 : index / (values.length - 1) * 240},${32 - Math.min(1, Math.max(0, value / maximum)) * 30}`).join(' ');
+  return values.map((value, index) => `${values.length === 1 ? 240 : index / (values.length - 1) * 240},${32 - (maximum > 0 ? Math.min(1, Math.max(0, value / maximum)) : 0) * 30}`).join(' ');
 }

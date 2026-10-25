@@ -10,6 +10,8 @@ Pour connecter une télé sans y saisir son mot de passe, choisir « Se connecte
 
 Dans l’explorateur, l’action « Ouvrir dans VLC » prépare un lien de lecture valable six heures et révocable. Sur Android, iPhone et iPad, toucher ensuite le bouton « Ouvrir dans VLC » de la fenêtre pour transmettre le média à l’application installée ; le navigateur peut demander confirmation. Le site ne peut pas vérifier si VLC est installé. La copie du lien et la playlist restent disponibles, notamment sur ordinateur ou si le navigateur bloque l’ouverture de l’application.
 
+Les jauges de transfert utilisent les pics de réception et d’envoi observés par le serveur. Ces deux maxima sont conservés dans une seule ligne PostgreSQL, commune à tous les navigateurs, et remplacés seulement lorsqu’ils sont dépassés ; aucun historique de débits n’est enregistré. Sur une installation existante, appliquer le schéma avec la commande `db:migrate` ci-dessous avant de redémarrer la nouvelle version.
+
 ## Docker local
 
 Avec Docker, Compose et npm disponibles, lancer depuis la racine du dépôt :
