@@ -1,72 +1,91 @@
 # Torrents Duck 2
 
-[Installation en français](docs/deployment.md) · [Installation in English](docs/deployment.en.md)
+[Français](README.fr.md) · **English** · [Deployment guide](docs/deployment.en.md) · [Contributing](#contributing) · [Apache 2.0](LICENSE)
 
-Torrents Duck 2 est la suite de [TorrentsDuck](https://github.com/guidouil/TorrentsDuck), initialement développé avec Meteor. Cette nouvelle version utilise SvelteKit/TypeScript, Better Auth, PostgreSQL 17, qBittorrent, Nginx et FTPS pour gérer une bibliothèque de torrents et de fichiers partagée.
+**An open source, self-hosted platform for sharing torrents, files and server resources within a community.**
 
-L’inscription est libre ; chaque nouveau compte reste sur une page d’attente, sans accès aux services, jusqu’à sa validation par un administrateur. L’adresse configurée dans `ADMIN_EMAIL` reçoit automatiquement le rôle administrateur à son inscription ; ses accès s’activent après confirmation de son adresse par mail.
+Torrents Duck 2 brings members together around one server, one torrent engine and one shared library. Where individual seedboxes divide a server into separate user spaces, this project pools downloads and storage: every addition grows the library for all approved members.
 
-Pour connecter une télé sans y saisir son mot de passe, choisir « Se connecter avec mon téléphone » sur la page de connexion. Scanner le QR code, se connecter sur le téléphone si nécessaire, comparer le code affiché sur les deux écrans puis autoriser la connexion. Le QR code expire après cinq minutes et ne peut servir qu’une fois. N’autoriser que les demandes lancées sur son propre appareil. Une déconnexion sur un appareil ferme toutes les sessions web du compte, y compris sur la télé, et annule ses QR codes déjà autorisés mais pas encore utilisés. Les écrans ouverts détectent la déconnexion en quelques secondes lorsque leur connexion réseau est disponible. Les deux appareils doivent pouvoir accéder à la même adresse du site (HTTPS en production).
+The idea is a lively torrent commons: a community hub where everyone contributes to a shared space. Accounts and permissions control access; files and transfers belong to the collective library.
 
-Dans l’explorateur, l’action « Ouvrir dans VLC » prépare un lien de lecture valable six heures et révocable. Sur Android, iPhone et iPad, toucher ensuite le bouton « Ouvrir dans VLC » de la fenêtre pour transmettre le média à l’application installée ; le navigateur peut demander confirmation. Le site ne peut pas vérifier si VLC est installé. La copie du lien et la playlist restent disponibles, notamment sur ordinateur ou si le navigateur bloque l’ouverture de l’application.
+The project is the successor to [TorrentsDuck](https://github.com/guidouil/TorrentsDuck), originally built with Meteor. This version uses Node.js 24+, Svelte 5, SvelteKit 3 and TypeScript, with Better Auth, PostgreSQL 17, qBittorrent, Nginx and FTPS. It is released under the [Apache 2.0 license](LICENSE).
 
-Les jauges de transfert utilisent les pics de réception et d’envoi observés par le serveur. Ces deux maxima sont conservés dans une seule ligne PostgreSQL, commune à tous les navigateurs, et remplacés seulement lorsqu’ils sont dépassés ; aucun historique de débits n’est enregistré. Sur une installation existante, appliquer le schéma avec la commande `db:migrate` ci-dessous avant de redémarrer la nouvelle version.
+The entire project was orchestrated with **OpenAI Sol 6.1 Ultra**.
 
-La page Recherche permet de trouver des torrents puis de les ajouter aux
-transferts collectifs. Le catalogue initial comprend The Pirate Bay, Torrents CSV,
-Nyaa.si et LimeTorrents ; Snowfl est disponible en installation facultative. Un administrateur
-peut attribuer à certains membres le droit supplémentaire « Gestionnaire des
-sources » pour installer, activer, désactiver ou retirer les plugins du catalogue.
-Les versions sont incluses dans l'image qBittorrent et leurs
-[sources et licences](deploy/qbittorrent/search/SOURCES.md) sont conservées dans
-le dépôt. La disponibilité des indexeurs externes peut varier.
+## Features
 
-Les gestionnaires peuvent aussi ajouter une source par URL, avec détection
-JSON, RSS/Atom/Torznab ou HTML contenant des magnets, fichiers torrent ou hashes
-reconnus. Utiliser `{query}` pour les mots-clés, ou une liste/un flux fixe filtré
-par nom. L'authentification HTTP Basic, Bearer ou `X-Api-Key` est facultative et
-exige HTTPS. URL et identifiants sont chiffrés côté serveur ; les sources et leurs
-accès sont partagés entre les membres approuvés. En cas d'échec, copier le rapport
-de détection depuis Sources ou Recherche pour demander un nouvel adaptateur.
-Voir les [limites et la procédure](docs/deployment.md#recherche-et-sources).
-Appliquer `db:migrate` sur une installation existante pour créer `search_sources`.
+- **Collective torrents**: search and manage shared transfers through qBittorrent.
+- **Shared library**: browse, download and create revocable playback links, with VLC integration.
+- **Web and FTPS access**: the same file spaces, available to active, approved accounts.
+- **Community administration**: registration approval, account management and a dedicated permission for managing search sources.
+- **TV sign-in**: approve a QR code from a phone without typing a password on the TV.
+- **Documented operations**: Docker Compose, HTTPS/FTPS, encrypted backups and Meteor account migration.
 
-Les tris (seeders, leechers, date récente, taille ou nom) et les filtres de
-seeders minimum et de taille s'appliquent avant pagination sur un maximum de
-2 000 résultats ; une limite atteinte est signalée. La recherche peut cibler une
-source ou toutes les sources actives. Les dates non fournies par le moteur
-restent inconnues ; celles de Snowfl et LimeTorrents sont approximatives lorsqu'elles existent.
+## One server, one shared library
 
-## Docker local
+| Space | Purpose | Member access |
+| --- | --- | --- |
+| `downloads` | Files managed by qBittorrent | Read through the website and FTPS |
+| `share` | Files contributed by the community | Read and write through the website and FTPS |
 
-Avec Docker, Compose et npm disponibles, lancer depuis la racine du dépôt :
+Both spaces are collective. Removing a torrent keeps its files; deleting its data requires explicit confirmation and affects the whole community.
+
+## Local Docker
+
+With Docker, Compose and npm available, run from the repository root:
 
 ```sh
 npm run local:up
 npm run local:admin
 ```
 
-`local:up` construit les images et démarre la configuration autonome [compose.local.yaml](compose.local.yaml), sans fichier `.env` ni installation des dépendances npm sur l’hôte. Le schéma PostgreSQL est initialisé automatiquement. Ouvrir [http://127.0.0.1:5180](http://127.0.0.1:5180), puis se connecter avec le compte fictif `admin` et le mot de passe `local-admin-password` (`admin@example.com`). `local:admin` crée ce premier administrateur et refuse de modifier une base contenant déjà des utilisateurs : l’exécuter uniquement au premier lancement.
+`local:up` builds the images and starts the standalone [compose.local.yaml](compose.local.yaml) configuration, without an `.env` file or host-side npm dependency installation. The PostgreSQL schema is initialized automatically. Open [http://127.0.0.1:5180](http://127.0.0.1:5180), then sign in with the test account `admin` and password `local-admin-password` (`admin@example.com`). `local:admin` creates this first administrator and refuses to modify a database that already contains users: run it only on the first launch.
 
-L’origine HTTP `http://127.0.0.1:5180` est incluse dans l’image à la construction ; pour changer cette URL, adapter `build.args.ORIGIN`, `ORIGIN`, `BETTER_AUTH_URL` et le port publié dans `compose.local.yaml`, puis reconstruire avec `npm run local:up`.
+The HTTP origin `http://127.0.0.1:5180` is baked into the image at build time. To change this URL, update `build.args.ORIGIN`, `ORIGIN`, `BETTER_AUTH_URL` and the published port in `compose.local.yaml`, then rebuild with `npm run local:up`.
 
 ```sh
-npm run local:logs  # Suivre les journaux
-npm run local:down  # Arrêter en conservant les données
-npm run local:up    # Reconstruire et redémarrer après une modification du code
+npm run local:logs  # Follow logs
+npm run local:down  # Stop while keeping data
+npm run local:up    # Rebuild and restart after code changes
 ```
 
-Les données restent dans des volumes nommés dédiés à cette pile locale, y compris après `local:down`. Seul le site publie un port, sur `127.0.0.1:5180` ; PostgreSQL et le RPC qBittorrent restent internes. Le port `5180` et le sous-réseau Docker `172.30.20.0/24` doivent être libres. Une autre pile Torrents Duck ne peut pas utiliser ce sous-réseau en parallèle ; arrêter ses conteneurs sans libérer son réseau ne suffit pas.
+Data remains in named volumes dedicated to this local stack, including after `local:down`. Only the website publishes a port, on `127.0.0.1:5180`; PostgreSQL and qBittorrent RPC stay internal. Port `5180` and Docker subnet `172.30.20.0/24` must be available. Another Torrents Duck stack cannot use this subnet at the same time; stopping its containers without releasing its network is not enough.
 
-Cette configuration utilise des identifiants fictifs pour les essais locaux, sans Nginx, FTPS ni envoi de mails réels. qBittorrent fonctionne sur un réseau interne sans accès aux pairs ni aux indexeurs Internet : les essais du moteur utilisent des torrents de test, des résultats de recherche simulés et des appels API locaux, sans téléchargement public.
+This configuration uses fictional credentials for local testing, without Nginx, FTPS or real email delivery. qBittorrent runs on an internal network without access to Internet peers or indexers: engine tests use test torrents, simulated search results and local API calls, without public downloads.
 
-## Développement
+## Usage
 
-Node 24 et PostgreSQL 17 sont nécessaires. Copier `.env.example` vers `.env`, choisir les secrets, et adapter `DATABASE_URL`, `QBT_URL`, `ORIGIN` et les chemins locaux.
+### Accounts and approval
 
-Pour les mails, définir `MAILGUN_API_KEY`, `MAILGUN_DOMAIN` (domaine vérifié dans Mailgun), `MAILGUN_FROM` (par exemple `Torrents Duck <noreply@mg.example.com>`) et `MAILGUN_API_URL` : `https://api.mailgun.net` pour un domaine US ou `https://api.eu.mailgun.net` pour un domaine EU. Les mails de réinitialisation, de confirmation et de notification des inscriptions utilisent l’API Mailgun ; sans clé Mailgun, la configuration `SMTP_*` existante reste utilisable. Chaque inscription avertit les administrateurs actifs et validés, avec un lien vers `/admin` ; en l’absence d’administrateur actif, le mail est envoyé à `ADMIN_EMAIL` si elle est définie. Un échec d’envoi est journalisé sans annuler l’inscription. Garder la clé dans `.env`, jamais dans Git.
+Registration is open. Each new account stays on a waiting page, without service access, until an administrator approves it. The address configured in `ADMIN_EMAIL` automatically receives the administrator role when registering; access is activated after email verification.
 
-Définir `ADMIN_EMAIL=admin@example.com` pour attribuer automatiquement le rôle admin lors de la création de ce compte, sans tenir compte de la casse. Le lien envoyé par mail active ses accès ; la page d’attente permet de renvoyer ce lien en cas d’échec d’envoi ou d’expiration. Les autres comptes restent soumis à la validation d’un administrateur. Une valeur vide désactive cette attribution ; changer la variable ne modifie pas les comptes existants.
+### TV sign-in
+
+To connect a TV without entering a password on it, choose “Sign in with my phone” on the sign-in page. Scan the QR code, sign in on the phone if needed, compare the code on both screens, then approve the connection. The QR code expires after five minutes and can only be used once. Only approve requests started on your own device. Signing out on one device closes all web sessions for the account, including the TV, and cancels approved QR codes that have not yet been used. Open screens detect the sign-out within a few seconds when their network connection is available. Both devices must be able to reach the same site address, using HTTPS in production.
+
+### VLC playback
+
+In the file browser, “Open in VLC” prepares a revocable playback link valid for six hours. On Android, iPhone and iPad, then tap the dialog's “Open in VLC” button to pass the media to the installed app; the browser may ask for confirmation. The website cannot check whether VLC is installed. Copying the link and downloading the playlist remain available, including on desktop or when the browser blocks opening the app.
+
+### Search and sources
+
+The Search page finds torrents and adds them to collective transfers. The initial catalogue includes The Pirate Bay, Torrents CSV, Nyaa.si and LimeTorrents; Snowfl is available as an optional installation. An administrator can grant selected members the additional “Source manager” permission to install, enable, disable or remove catalogue plugins. The pinned versions are bundled in the qBittorrent image, and their [sources and licenses](deploy/qbittorrent/search/SOURCES.md) are kept in the repository. External indexer availability may vary.
+
+Source managers can also add a source by URL, with detection of JSON, RSS/Atom/Torznab, or HTML containing recognized magnets, torrent files or hashes. Use `{query}` for keywords, or a fixed list or feed filtered by name. Optional HTTP Basic, Bearer or `X-Api-Key` authentication requires HTTPS. URLs and credentials are encrypted on the server; sources and their access are shared among approved members. If detection fails, copy the detection report from Sources or Search when requesting a new adapter. See the [limits and procedure](docs/deployment.en.md#search-and-sources). Apply `db:migrate` on an existing installation to create `search_sources`.
+
+Sorting by seeders, leechers, newest date, size or name, and filtering by minimum seeders and size, happen before pagination over a maximum of 2,000 results; reaching the limit is reported. Search can target one source or all active sources. Dates not provided by the engine remain unknown; Snowfl and LimeTorrents dates are approximate when available.
+
+### Transfer gauges
+
+Transfer gauges use the peak download and upload rates observed by the server. These two maxima are stored in a single PostgreSQL row shared by all browsers and are only replaced when exceeded; no speed history is recorded. On an existing installation, apply the schema with the `db:migrate` command below before restarting the new version.
+
+## Development
+
+Node.js 24+, PostgreSQL 17 and a qBittorrent instance are required. Copy [.env.example](.env.example) to `.env`, choose secrets, and configure `DATABASE_URL`, `QBT_URL`, `ORIGIN` and local paths.
+
+For email, set `MAILGUN_API_KEY`, `MAILGUN_DOMAIN` (a verified Mailgun domain), `MAILGUN_FROM` (for example `Torrents Duck <noreply@mg.example.com>`) and `MAILGUN_API_URL`: `https://api.mailgun.net` for a US domain or `https://api.eu.mailgun.net` for an EU domain. Password reset, verification and registration notification emails use the Mailgun API. Without a Mailgun key, configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in `.env`. Each registration notifies active, approved administrators with a link to `/admin`; if there is no active administrator, the email is sent to `ADMIN_EMAIL` when configured. Delivery failures are logged without cancelling registration. Keep keys and passwords in `.env`, never in Git.
+
+Set `ADMIN_EMAIL=admin@example.com` to automatically assign the admin role when that account is created, using a case-insensitive address match. The emailed verification link activates access; the waiting page can resend it if delivery fails or the link expires. Other accounts still require administrator approval. An empty value disables automatic assignment; changing the variable does not modify existing accounts.
 
 ```sh
 npm ci
@@ -74,7 +93,9 @@ node --env-file=.env --run db:migrate
 npm run dev
 ```
 
-Pour les fichiers locaux, définir `DATA_ROOT=./data`, `DOWNLOADS_DIR=./data/downloads`, `SHARE_DIR=./data/share` et `FILE_DELIVERY=node`, puis créer ces dossiers. Définir `ORIGIN` et `BETTER_AUTH_URL` sur `http://127.0.0.1:5173`, et `DATABASE_URL` sur le port PostgreSQL publié sur l’hôte (`postgres` est un nom interne à Docker). `npm run dev` charge automatiquement `.env` au démarrage ; redémarrer le serveur après toute modification de ce fichier. Le compte administrateur initial se crée avec `node --env-file=.env --run admin:create` et les variables `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. En cas de migration des comptes Meteor, effectuer l'import avant cette création : l'import exige une table utilisateurs vide.
+For local files, set `DATA_ROOT=./data`, `DOWNLOADS_DIR=./data/downloads`, `SHARE_DIR=./data/share` and `FILE_DELIVERY=node`, then create those directories. Set `ORIGIN` and `BETTER_AUTH_URL` to `http://127.0.0.1:5173`, and point `DATABASE_URL` at the PostgreSQL port published on the host (`postgres` is an internal Docker hostname). `npm run dev` loads `.env` automatically at startup; restart the server after changing this file. Create the initial administrator with `node --env-file=.env --run admin:create` and the `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` variables. If migrating Meteor accounts, import them before creating this account: the import requires an empty user table.
+
+### Checks
 
 ```sh
 npm run check
@@ -86,24 +107,22 @@ python3 scripts/backup-ftp.test.py
 docker compose --env-file .env.example config --no-env-resolution -q
 ```
 
-Définir `TEST_DATABASE_URL` pour exécuter aussi les tests d'authentification sur PostgreSQL. Le parcours HTTP complet se vérifie avec `node --test tests/http-flow.test.mjs`, en définissant `HTTP_BASE_URL`, `HTTP_ADMIN_LOGIN` et `HTTP_ADMIN_PASSWORD` pour une instance locale et un administrateur de test.
+`npm test` runs `tests/**/*.test.ts`. Set `TEST_DATABASE_URL` to a dedicated test database to include PostgreSQL tests; without it, they are skipped. Run the full HTTP flow separately with `node --test tests/http-flow.test.mjs`, setting `HTTP_BASE_URL`, `HTTP_ADMIN_LOGIN` and `HTTP_ADMIN_PASSWORD` for a local instance and test administrator. These tests write data: never point them at production.
 
-## Installation et récupération des comptes
+## Deployment and account migration
 
-Suivre le guide Ubuntu 24.04 LTS et Docker en [français](docs/deployment.md) ou en [anglais](docs/deployment.en.md), puis [le guide de sauvegarde et migration depuis Meteor](docs/migration-backups.md) si nécessaire. L'installation couvre les ports, les secrets, PostgreSQL, les certificats HTTPS/FTPS, le premier administrateur, les sauvegardes et les mises à jour. Aucun script ne reformate un disque et aucun identifiant SSH n'est embarqué. Les services PostgreSQL et RPC qBittorrent ne publient aucun port. Les téléchargements HTTP passent par une autorisation de session, puis Nginx sert les fichiers.
+Follow the Ubuntu 24.04 LTS and Docker deployment guide in [English](docs/deployment.en.md) or [French](docs/deployment.md), then the [Meteor migration and backup guide (French)](docs/migration-backups.md) if needed. Installation covers ports, secrets, PostgreSQL, HTTPS/FTPS certificates, the first administrator, backups and updates. No script reformats a disk, and no SSH credentials are bundled. PostgreSQL and qBittorrent RPC do not publish ports. HTTP downloads require session authorization before Nginx serves the files.
 
-Les deux espaces sont collectifs : `downloads` est géré par qBittorrent et accessible en lecture via le site et FTPS ; `share` est modifiable via le site et FTPS. Le FTPS explicite utilise le port 21000 et exige TLS pour les commandes et les données.
+Both spaces are collective: qBittorrent manages `downloads`, which is readable through the website and FTPS; `share` is writable through both. Explicit FTPS uses port 21000 and requires TLS for commands and data.
 
-Une sauvegarde FTP chiffrée facultative peut partir directement du serveur chaque nuit, sans Mac allumé : PostgreSQL et configuration complets, puis les fichiers de `share` qui tiennent dans le quota, en commençant par les plus petits. Elle est désactivée par défaut ; le [guide de sauvegarde](docs/migration-backups.md#sauvegarde-ftp-automatique-depuis-le-serveur) décrit les clés `age`, le quota de 100 Go, la rétention et la restauration. Les téléchargements et l'état qBittorrent restent exclus.
+An optional encrypted FTP backup can run directly from the server every night, without a Mac running: it includes the full PostgreSQL database and configuration, followed by files from `share` that fit within the quota, starting with the smallest. It is disabled by default; the [backup guide (French)](docs/migration-backups.md#sauvegarde-ftp-automatique-depuis-le-serveur) describes `age` keys, the 100 GB quota, retention and restoration. Downloads and qBittorrent state remain excluded.
 
-Les images et le fonctionnement sur le serveur doivent être validés avec les essais du guide avant ouverture. Les fichiers et anciens torrents du serveur historique ne sont pas inclus dans la migration des comptes.
+Validate the images and server behavior with the guide's checks before opening access. Files and historical torrents from the old server are not included in account migration.
 
-## Contribuer
+## Contributing
 
-Les issues et pull requests peuvent décrire un problème reproductible ou une amélioration ciblée. Exécuter les vérifications ci-dessus avant de proposer un changement. Utiliser des données fictives dans les exemples, captures et journaux ; conserver les domaines de production, sauvegardes, clés et fichiers `.env` hors du dépôt.
+Issues and pull requests are welcome for reproducible problems or focused improvements. Run the checks above before proposing a change. Use fictional data in examples, screenshots and logs; keep production domains, backups, keys and `.env` files out of the repository.
 
-## Licence
+## License
 
-Sous [licence Apache 2.0](LICENSE), comme le projet TorrentsDuck d'origine. Les
-[plugins de recherche tiers](deploy/qbittorrent/search/SOURCES.md) conservent
-leurs licences BSD, MIT ou GPL, incluses avec leurs sources.
+Released under the [Apache 2.0 license](LICENSE), like the original TorrentsDuck project. [Third-party search plugins](deploy/qbittorrent/search/SOURCES.md) retain their BSD, MIT or GPL licenses, included alongside their sources.

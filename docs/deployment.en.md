@@ -2,7 +2,7 @@
 
 [Français](deployment.md) · [English](deployment.en.md)
 
-To try the project on your computer with Docker, follow the [local Docker section in the README](../README.md#docker-local): run `npm run local:up`, then `npm run local:admin` on the first launch. This standalone stack uses test data and fictional credentials at [http://127.0.0.1:5180](http://127.0.0.1:5180), without Nginx, FTPS, real email delivery or Internet BitTorrent peers.
+To try the project on your computer with Docker, follow the [local Docker section in the README](../README.md#local-docker): run `npm run local:up`, then `npm run local:admin` on the first launch. This standalone stack uses test data and fictional credentials at [http://127.0.0.1:5180](http://127.0.0.1:5180), without Nginx, FTPS, real email delivery or Internet BitTorrent peers.
 
 The local image is built for `http://127.0.0.1:5180`: do not reuse it in production. The deployment below keeps its network and Nginx reverse proxy unchanged.
 
@@ -105,7 +105,7 @@ Edit `.env` with a text editor. Run `openssl rand -hex 32` again for each secret
 | `ACME_EMAIL` | Certificate contact address, for example `admin@example.com`. |
 | `ADMIN_EMAIL` | Email of the future administrator signing up, for example `admin@example.com`; an empty value disables automatic assignment. |
 
-Configure email before opening the service: `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM` and `MAILGUN_API_URL` (`https://api.mailgun.net` for the US region, `https://api.eu.mailgun.net` for Europe). The sending domain must be verified in Mailgun. Without a Mailgun key, use the `SMTP_*` variables described in the [README (French)](../README.md). Email is used for address verification, password resets and registration notifications.
+Configure email before opening the service: `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM` and `MAILGUN_API_URL` (`https://api.mailgun.net` for the US region, `https://api.eu.mailgun.net` for Europe). The sending domain must be verified in Mailgun. Without a Mailgun key, use the `SMTP_*` variables described in the [README](../README.md). Email is used for address verification, password resets and registration notifications.
 
 Create an A record for `duck.example.com` pointing to the server's IPv4 in your domain's DNS zone. Wait for propagation before requesting the certificate. Publish an AAAA record only after preparing and testing IPv6; the torrent engine is restricted to IPv4.
 

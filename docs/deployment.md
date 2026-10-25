@@ -2,7 +2,7 @@
 
 [Français](deployment.md) · [English](deployment.en.md)
 
-Pour essayer le projet sur votre ordinateur avec Docker, suivre la section [Docker local du README](../README.md#docker-local) : `npm run local:up`, puis `npm run local:admin` au premier lancement. Cette pile autonome utilise des données et identifiants fictifs sur [http://127.0.0.1:5180](http://127.0.0.1:5180), sans Nginx, FTPS, mails réels ni pairs BitTorrent Internet.
+Pour essayer le projet sur votre ordinateur avec Docker, suivre la section [Docker local du README](../README.fr.md#docker-local) : `npm run local:up`, puis `npm run local:admin` au premier lancement. Cette pile autonome utilise des données et identifiants fictifs sur [http://127.0.0.1:5180](http://127.0.0.1:5180), sans Nginx, FTPS, mails réels ni pairs BitTorrent Internet.
 
 L’image locale est construite pour `http://127.0.0.1:5180` : ne pas la réutiliser en production. Le déploiement ci-dessous conserve son réseau et son reverse proxy Nginx.
 
@@ -105,7 +105,7 @@ openssl rand -hex 32
 | `ACME_EMAIL` | Adresse de contact pour les certificats, par exemple `admin@example.com`. |
 | `ADMIN_EMAIL` | Adresse du futur administrateur inscrit, par exemple `admin@example.com` ; une valeur vide désactive l'attribution automatique. |
 
-Configurer les mails avant l'ouverture : `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM` et `MAILGUN_API_URL` (`https://api.mailgun.net` aux États-Unis, `https://api.eu.mailgun.net` en Europe). Le domaine d'envoi doit être vérifié dans Mailgun. Sans clé Mailgun, utiliser les variables `SMTP_*` décrites dans le [README](../README.md). Ces mails servent à la confirmation d'adresse, à la réinitialisation et aux notifications d'inscription.
+Configurer les mails avant l'ouverture : `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM` et `MAILGUN_API_URL` (`https://api.mailgun.net` aux États-Unis, `https://api.eu.mailgun.net` en Europe). Le domaine d'envoi doit être vérifié dans Mailgun. Sans clé Mailgun, utiliser les variables `SMTP_*` décrites dans le [README](../README.fr.md). Ces mails servent à la confirmation d'adresse, à la réinitialisation et aux notifications d'inscription.
 
 Créer dans la zone DNS du domaine un enregistrement A pour `duck.example.com` vers l'IPv4 du serveur. Attendre sa propagation avant l'émission du certificat. Ne publier un AAAA qu'après avoir préparé et testé l'IPv6 ; le moteur torrent est limité à IPv4.
 
