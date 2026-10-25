@@ -10,7 +10,7 @@ function mountChat(api = vi.fn().mockResolvedValue({ messages: [], nextCursor: n
     api, onMount: vi.fn(), tick: vi.fn().mockResolvedValue(undefined),
     $state: (value: unknown) => value
   };
-  runInNewContext(transpile(`${script}\nglobalThis.chat = { keydown, send, input: (value) => { body = value; }, state: () => ({ body, busy, error, messages }) };`), context);
+  runInNewContext(transpile(`${script}\nglobalThis.chat = { keydown, send, shortName, input: (value) => { body = value; }, state: () => ({ body, busy, error, messages }) };`), context);
   return { api, event: { preventDefault: vi.fn() }, ...context.chat };
 }
 
@@ -20,6 +20,21 @@ function keyEvent(overrides = {}) {
     preventDefault: vi.fn(), currentTarget: { form: { requestSubmit: vi.fn() } }, ...overrides
   };
 }
+
+describe('chat mobile names', () => {
+  it.each([
+    ['member', 'member'],
+    ['abcdefg', 'abcdefg'],
+    ['abcdefgh', 'abcdefgh'],
+    ['abcdefghi', 'abcdefg…'],
+    ['averylongmembername', 'averylo…'],
+    ['abcdef😀h', 'abcdef😀h'],
+    ['abcdef😀hi', 'abcdef😀…'],
+    ['abcdefe\u0301hi', 'abcdefe\u0301…']
+  ])('formats %s as %s', (name, expected) => {
+    expect(mountChat().shortName(name)).toBe(expected);
+  });
+});
 
 describe('chat keyboard shortcuts', () => {
   it('submits the form on Enter without inserting a newline', () => {

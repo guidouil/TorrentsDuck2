@@ -7,6 +7,10 @@
   let messages = $state<any[]>([]); let body = $state(''); let error = $state(''); let busy = $state(false); let loading = $state(true); let nextCursor = $state<string | null>(null); let container = $state<HTMLDivElement>();
   async function load(older = false) { try { const result = await api(`/api/chat${older && nextCursor ? `?before=${encodeURIComponent(nextCursor)}` : ''}`); const nearBottom = !container || container.scrollHeight - container.scrollTop - container.clientHeight < 90; if (older) messages = [...result.messages, ...messages]; else { const map = new Map([...messages, ...result.messages].map((x) => [x.id, x])); messages = [...map.values()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()); } if (older || loading) nextCursor = result.nextCursor; loading = false; if (!older && nearBottom) { await tick(); container?.scrollTo({ top: container.scrollHeight, behavior: 'smooth' }); } } catch (e) { error = (e as Error).message; loading = false; } }
   onMount(() => { void load(); const timer = setInterval(() => { if (!document.hidden) void load(); }, 5000); return () => clearInterval(timer); });
+  function shortName(name: string) {
+    const characters = Array.from(new Intl.Segmenter().segment(name), ({ segment }) => segment);
+    return characters.length > 8 ? characters.slice(0, 7).join('') + '…' : name;
+  }
   function keydown(event: KeyboardEvent & { currentTarget: HTMLTextAreaElement }) {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
@@ -28,7 +32,7 @@
       {/if}
       <article class="chat-entry">
         <time datetime={message.createdAt} title={date.toLocaleString($language)} aria-label={date.toLocaleString($language)}>[{date.toLocaleTimeString($language, { hour: '2-digit', minute: '2-digit', hour12: false })}]</time>
-        <strong>&lt;{message.name}&gt;</strong>
+        <strong><span class="chat-name-full" aria-hidden="true">&lt;{message.name}&gt;</span><span class="chat-name-short" aria-hidden="true">&lt;{shortName(message.name)}&gt;</span><span class="sr-only">&lt;{message.name}&gt;</span></strong>
         <p>{message.body}</p>
       </article>
     {/each}

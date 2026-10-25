@@ -209,6 +209,7 @@ dialog p { overflow-wrap: anywhere; font-size: 14px; color: var(--muted); line-h
 .chat-date { margin-block: 8px 4px; color: var(--muted); font-size: 12px; }
 .chat-entry { display: grid; grid-template-columns: 7ch 14ch minmax(0, 1fr); align-items: baseline; gap: 10px; min-width: 0; padding-block: 2px; line-height: 1.45; }
 .chat-entry strong { min-width: 0; color: var(--accent-ink); font-weight: 600; overflow-wrap: anywhere; }
+.chat-name-short { display: none; }
 .chat-entry time { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .chat-entry p { min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-form { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
@@ -310,7 +311,9 @@ dialog p { overflow-wrap: anywhere; font-size: 14px; color: var(--muted); line-h
   .app-shell main .file-glyph { background: transparent; color: var(--accent-ink); border-radius: 0; }
   .app-shell .toolbar, .app-shell .panel-bottom { padding-inline: 0; }
   .chat-messages { padding-inline: 0; }
-  .chat-entry { grid-template-columns: max-content 10ch minmax(0, 1fr); gap: 0; font-size: 13px; }
+  .chat-entry { grid-template-columns: max-content minmax(10ch, max-content) minmax(0, 1fr); gap: 0; font-size: 13px; }
+  .chat-name-full { display: none; }
+  .chat-name-short { display: inline; }
   .chat-entry p { margin-inline-start: 6px; }
   .chat-form { padding-inline: 0; background: transparent; border-top: 1px solid var(--line); }
 }
