@@ -134,7 +134,6 @@ p.subtitle { color: var(--muted); font-size: 14px; margin: 0; line-height: 1.6; 
 .stat-label { font-size: 13px; color: var(--muted); margin-bottom: 8px; display: flex; gap: 8px; align-items: center; }
 .stat-value { font-size: 26px; line-height: 1.25; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; letter-spacing: -.5px; font-weight: 400; }
 .stat-value small { margin-left: 4px; font-size: 14px; color: var(--muted); }
-.stat-foot { color: var(--muted); font-size: 12px; margin-top: 8px; }
 .accent { color: var(--accent-ink); }
 .panel { min-width: 0; background: var(--panel); border-radius: var(--shape-lg); overflow: hidden; }
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); }

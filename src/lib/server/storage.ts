@@ -2,11 +2,12 @@ import { statfs } from 'node:fs/promises';
 import { error } from '@sveltejs/kit';
 
 export async function storageStatus() {
-	const stats = await statfs(process.env.DATA_ROOT ?? './data');
+	const stats = await statfs(process.env.DOWNLOADS_DIR ?? process.env.DATA_ROOT ?? './data');
 	const total = stats.blocks * stats.bsize;
+	const used = (stats.blocks - stats.bfree) * stats.bsize;
 	const available = stats.bavail * stats.bsize;
 	const reserved = Math.ceil(total * 0.1);
-	return { total, available, reserved, usable: Math.max(0, available - reserved), canDownload: available > reserved };
+	return { total, used, available, reserved, usable: Math.max(0, available - reserved), canDownload: available > reserved };
 }
 
 export async function requireStorage(bytes = 0) {

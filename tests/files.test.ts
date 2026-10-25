@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, it, expect } from 'vitest';
-import { mkdtemp, mkdir, writeFile, readFile, symlink, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, symlink, rm, readdir, utimes } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
@@ -22,6 +22,27 @@ function event(url: string, options: RequestInit = {}) {
 	const request = new Request(url, options);
 	return { request, url: new URL(url) } as RequestEvent;
 }
+
+describe('file listing order', () => {
+	it.each([
+		['', ['z-new.txt', 'a-old.txt']],
+		['sort=modifiedAt', ['z-new.txt', 'a-old.txt']],
+		['sort=modifiedAt&order=asc', ['a-old.txt', 'z-new.txt']],
+		['sort=name', ['a-old.txt', 'z-new.txt']],
+		['sort=name&order=desc', ['z-new.txt', 'a-old.txt']],
+		['sort=size', ['a-old.txt', 'z-new.txt']]
+	])('sorts files with %s and keeps folders first', async (options, expected) => {
+		const root = process.env.SHARE_DIR!;
+		await mkdir(path.join(root, 'folder'));
+		await writeFile(path.join(root, 'a-old.txt'), 'old');
+		await writeFile(path.join(root, 'z-new.txt'), 'new content');
+		for (const [name, date] of [['folder', '2024-01-01'], ['a-old.txt', '2025-01-01'], ['z-new.txt', '2026-01-01']]) {
+			await utimes(path.join(root, name), new Date(date), new Date(date));
+		}
+		const list = await listFiles('share', '', new URLSearchParams(options));
+		expect(list.entries.map((entry) => entry.name)).toEqual(['folder', ...expected]);
+	});
+});
 
 describe('file boundary', () => {
 	it.each(['../etc/passwd', '/etc/passwd', 'a/../secret', 'a/./b', 'a\\b', 'a\0b', 'a\nb'])('rejects %s', (value) => {

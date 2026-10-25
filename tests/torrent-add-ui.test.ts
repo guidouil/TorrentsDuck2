@@ -2,15 +2,17 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { transpile } from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
+import { MAX_BANDWIDTH, megabits, diskPercent, chartPoints } from '../src/lib/transfer-metrics';
 
 function mountTransfers(api = vi.fn().mockResolvedValue({ torrents: [] })) {
   const script = readFileSync(new URL('../src/routes/(app)/+page.svelte', import.meta.url), 'utf8').split('<script lang="ts">')[1].split('</script>')[0].replace(/^\s*import .+;\s*$/gm, '');
   const context: Record<string, any> = {
     api, FormData, $t: { torrentAdded: 'Added' }, onMount: () => {},
+    MAX_BANDWIDTH, megabits, diskPercent, chartPoints,
     $props: () => ({ data: { user: { id: 'member' } } }),
     $state: (value: unknown) => value, $derived: (value: unknown) => value
   };
-  runInNewContext(transpile(`${script}\nglobalThis.transfers = { addTorrent, input: (value, file) => { source = value; upload = file; }, state: () => ({ source, upload, busy, error, notice }) };`), context);
+  runInNewContext(transpile(`${script}\nglobalThis.transfers = { addTorrent, snapshot, input: (value, file) => { source = value; upload = file; }, state: () => ({ source, upload, busy, error, notice, history, lastSample, stats }) };`), context);
   const reset = vi.fn();
   return { api, reset, event: { preventDefault: vi.fn(), currentTarget: { reset } }, ...context.transfers };
 }
@@ -77,5 +79,31 @@ describe('inline torrent form', () => {
     expect(transfers.api.mock.calls[1][1].body.get('torrent').name).toBe('retry.torrent');
     expect(transfers.reset).toHaveBeenCalledOnce();
     expect(transfers.state()).toMatchObject({ source: '', upload: undefined, busy: false, error: '', notice: 'Added' });
+  });
+});
+
+describe('live transfer chart', () => {
+  it('does not duplicate the same cached sample received over HTTP and SSE', () => {
+    const transfers = mountTransfers();
+    const sample = { sampledAt: 123, stats: { downloadSpeed: 25_000_000, uploadSpeed: 0 } };
+    transfers.snapshot(sample);
+    transfers.snapshot(sample);
+    transfers.snapshot({ ...sample, sampledAt: 122, stats: { downloadSpeed: 0, uploadSpeed: 0 } });
+    expect(transfers.state().stats).toEqual(sample.stats);
+    expect(transfers.state().history).toEqual([{ download: 200, upload: 0 }]);
+    expect(transfers.state().lastSample).toBe(123);
+  });
+
+  it('keeps only the last 40 valid samples, preserving genuine zero speeds', () => {
+    const transfers = mountTransfers();
+    for (let sampledAt = 1; sampledAt <= 45; sampledAt++) {
+      transfers.snapshot({ sampledAt, stats: { downloadSpeed: sampledAt * 1_000_000, uploadSpeed: 0 } });
+    }
+    expect(transfers.state().history).toHaveLength(40);
+    expect(transfers.state().history[0]).toEqual({ download: 48, upload: 0 });
+    expect(transfers.state().history.at(-1)).toEqual({ download: 360, upload: 0 });
+    transfers.snapshot({ sampledAt: 46, stats: { downloadSpeed: NaN, uploadSpeed: 0 } });
+    expect(transfers.state().history).toHaveLength(40);
+    expect(transfers.state().history.at(-1)).toEqual({ download: 360, upload: 0 });
   });
 });

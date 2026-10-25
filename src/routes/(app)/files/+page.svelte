@@ -11,7 +11,7 @@
   const space = $derived(location.searchParams.get('space') === 'share' ? 'share' : 'downloads');
   const path = $derived(location.searchParams.get('path') ?? '');
   const query = $derived(location.searchParams.get('search') ?? '');
-  const sort = $derived(location.searchParams.get('sort') ?? 'name');
+  const sort = $derived(location.searchParams.get('sort') ?? 'modifiedAt');
   const requestedOffset = $derived(Number(location.searchParams.get('offset')));
   const offset = $derived(Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0);
   const parts = $derived(path.split('/').filter(Boolean));

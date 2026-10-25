@@ -138,6 +138,22 @@ esac
         self.assertEqual(set(configuration["volumes"]), {"postgres", "downloads", "share", "qbittorrent"})
 
     @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
+    def test_service_cpu_metrics_have_separate_cgroups_and_read_only_access(self):
+        result = subprocess.run(
+            ["docker", "compose", "--env-file", ".env.example", "config", "--format", "json"],
+            cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True, text=True,
+        )
+        services = json.loads(result.stdout)["services"]
+        for service in ["web", "qbittorrent", "postgres", "nginx", "ftp"]:
+            self.assertEqual(services[service]["cgroup_parent"], f"torrentduck-{service}.slice")
+        mount = next(mount for mount in services["web"]["volumes"] if mount["target"] == "/host-cgroup")
+        self.assertEqual(mount["source"], "/sys/fs/cgroup")
+        self.assertTrue(mount["read_only"])
+        self.assertNotIn("SYS_ADMIN", services["web"].get("cap_add", []))
+        self.assertFalse(services["web"].get("privileged", False))
+        self.assertFalse(any("docker.sock" in mount["source"] for mount in services["web"]["volumes"]))
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
     def test_compose_tmpfs_targets_are_absolute(self):
         result = subprocess.run(
             ["docker", "compose", "--env-file", ".env.example", "config", "--format", "json"],

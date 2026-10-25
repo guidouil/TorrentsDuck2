@@ -70,8 +70,8 @@ export async function listFiles(space: Space, requested: string, options: URLSea
 			entries.push({ name: dirent.name, path: path.posix.join(directory.relative, dirent.name), directory: stat.isDirectory(), size: stat.size, modifiedAt: stat.mtime.toISOString() });
 		} catch (cause) { if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause; }
 	}
-	const sort = options.get('sort') ?? 'name';
-	const direction = options.get('order') === 'desc' ? -1 : 1;
+	const sort = options.get('sort') ?? 'modifiedAt';
+	const direction = (options.get('order') ?? (sort === 'modifiedAt' ? 'desc' : 'asc')) === 'desc' ? -1 : 1;
 	entries.sort((a, b) => Number(b.directory) - Number(a.directory) || direction * (sort === 'size' ? a.size - b.size : sort === 'modifiedAt' ? a.modifiedAt.localeCompare(b.modifiedAt) : a.name.localeCompare(b.name)));
 	const offset = Math.max(0, Math.min(Number(options.get('offset')) || 0, entries.length));
 	const limit = Math.max(1, Math.min(Number(options.get('limit')) || 100, 500));

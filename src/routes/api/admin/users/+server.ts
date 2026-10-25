@@ -5,7 +5,7 @@ import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async (event) => {
   await requireAdmin(event);
-  const users = await query('SELECT id, username, email, role, enabled, approved, "createdAt", "emailVerified" FROM "user" ORDER BY "createdAt", id');
+  const users = await query('SELECT id, username, email, role, enabled, approved, "createdAt", "emailVerified" FROM "user" ORDER BY "createdAt" DESC, id');
   return json({ users });
 };
 

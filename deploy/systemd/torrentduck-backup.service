@@ -1,0 +1,12 @@
+[Unit]
+Description=Back up Torrents Duck database and shared files to encrypted FTP storage
+After=torrentduck.service network-online.target
+Requires=torrentduck.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/torrentduck
+ExecStart=/usr/bin/python3 /opt/torrentduck/scripts/backup-ftp.py
+UMask=0077
+TimeoutStartSec=12h

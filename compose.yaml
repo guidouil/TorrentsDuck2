@@ -1,5 +1,17 @@
 name: torrentduck
 
+x-backup-ftp:
+  enabled: ${BACKUP_FTP_ENABLED:-false}
+  host: ${BACKUP_FTP_HOST:-}
+  port: ${BACKUP_FTP_PORT:-21}
+  user: ${BACKUP_FTP_USER:-}
+  password: ${BACKUP_FTP_PASSWORD:-}
+  tls: ${BACKUP_FTP_TLS:-false}
+  directory: ${BACKUP_FTP_DIRECTORY:-torrents-duck}
+  recipient: ${BACKUP_AGE_RECIPIENT:-}
+  quota_bytes: ${BACKUP_FTP_QUOTA_BYTES:-100000000000}
+  keep: ${BACKUP_FTP_KEEP:-1}
+
 x-logging: &logging
   driver: json-file
   options:
@@ -9,6 +21,7 @@ x-logging: &logging
 services:
   postgres:
     image: postgres:17-bookworm
+    cgroup_parent: torrentduck-postgres.slice
     restart: unless-stopped
     environment:
       POSTGRES_DB: duck
@@ -30,6 +43,7 @@ services:
 
   web:
     build: .
+    cgroup_parent: torrentduck-web.slice
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
@@ -67,6 +81,7 @@ services:
     volumes:
       - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads:ro
       - ${DATA_ROOT:-/srv/torrentduck}/share:/data/share
+      - /sys/fs/cgroup:/host-cgroup:ro
     networks: [edge, database, rpc, auth]
     depends_on:
       postgres: {condition: service_healthy}
@@ -79,6 +94,7 @@ services:
 
   qbittorrent:
     build: deploy/qbittorrent
+    cgroup_parent: torrentduck-qbittorrent.slice
     restart: unless-stopped
     environment:
       QBT_USERNAME: ${QBT_USERNAME:?Set QBT_USERNAME}
@@ -102,6 +118,7 @@ services:
 
   nginx:
     build: deploy/nginx
+    cgroup_parent: torrentduck-nginx.slice
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN}
@@ -125,6 +142,7 @@ services:
 
   ftp:
     build: deploy/ftp
+    cgroup_parent: torrentduck-ftp.slice
     restart: unless-stopped
     environment:
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?Set INTERNAL_API_SECRET}

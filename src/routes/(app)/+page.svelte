@@ -2,13 +2,22 @@
   import Notification from '#lib/Notification.svelte';
   import { onMount } from 'svelte';
   import { api, bytes, duration } from '#lib/client.js';
-  import { t } from '#lib/i18n.js';
+  import { language, t } from '#lib/i18n.js';
+  import MetricGauge from '#lib/MetricGauge.svelte';
+  import { MAX_BANDWIDTH, megabits, diskPercent, chartPoints } from '#lib/transfer-metrics.js';
   import Modal from '#lib/Modal.svelte';
   import Icon from '#lib/Icon.svelte';
   let { data } = $props();
   type Torrent = { hash: string; name: string; size: number; progress: number; downloadSpeed: number; uploadSpeed: number; ratio: number; peers: number; eta: number; state: string; authorId?: string };
   let torrents = $state<Torrent[]>([]);
   let stats = $state<any>({}); let storage = $state<any>({});
+  let services = $state<{ id: string; cpuPercent: number | null }[]>([]);
+  let lastSample = $state(0);
+  let history = $state<{ download: number; upload: number }[]>([]);
+  const serviceNames = [{ id: 'web', name: 'Web' }, { id: 'qbittorrent', name: 'qBittorrent' }, { id: 'postgres', name: 'PostgreSQL' }, { id: 'nginx', name: 'Nginx' }, { id: 'ftp', name: 'FTPS' }];
+  const downloadSpeed = $derived(lastSample ? megabits(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.downloadSpeed, 0)) : null);
+  const uploadSpeed = $derived(lastSample ? megabits(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.uploadSpeed, 0)) : null);
+  const diskUsage = $derived(diskPercent(storage));
   let loading = $state(true); let connected = $state(false); let error = $state(''); let notice = $state('');
   let query = $state(''); let mine = $state(false); let sort = $state('progress'); let limit = $state(25); let currentPage = $state(1);
   let source = $state(''); let upload = $state<File | undefined>(); let busy = $state(false);
@@ -16,7 +25,20 @@
   const filtered = $derived(torrents.filter((x) => x.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) && (!mine || x.authorId === data.user?.id)).sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'speed' ? b.downloadSpeed - a.downloadSpeed : b.progress - a.progress));
   const rows = $derived(filtered.slice((currentPage - 1) * limit, currentPage * limit));
   const pages = $derived(Math.max(1, Math.ceil(filtered.length / limit)));
-  function snapshot(value: any) { if (value.error) { error = value.error; loading = false; return; } torrents = value.torrents ?? []; currentPage = Math.min(currentPage, pages); stats = value.stats ?? {}; storage = value.storage ?? {}; loading = false; error = ''; }
+  function snapshot(value: any) {
+    if (value.error) { error = value.error; loading = false; return; }
+    if (value.sampledAt !== undefined && value.sampledAt < lastSample) return;
+    torrents = value.torrents ?? []; currentPage = Math.min(currentPage, pages);
+    stats = value.stats ?? {}; storage = value.storage ?? {}; services = value.metrics?.services ?? [];
+    const time = value.sampledAt ?? Date.now();
+    if (time > lastSample) {
+      const download = megabits(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.downloadSpeed, 0));
+      const upload = megabits(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.uploadSpeed, 0));
+      if (download !== null && upload !== null) history = [...history.slice(-39), { download, upload }];
+      lastSample = time;
+    }
+    loading = false; error = '';
+  }
   onMount(() => {
     api('/api/torrents').then(snapshot).catch((e) => { error = e.message; loading = false; });
     const events = new EventSource('/api/events');
@@ -34,11 +56,43 @@
 </script>
 <svelte:head><title>{$t.transfers} · Torrents Duck</title></svelte:head>
 <h1 class="sr-only">{$t.transfers}</h1>
-<div class="stat-grid">
-  <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="download" size={16} /></span> {$t.downloading}</div><div class="stat-value">{bytes(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((s, x) => s + x.downloadSpeed, 0))}<small> /s</small></div><div class="stat-foot">{torrents.filter((x) => x.progress < 1 && !stopped(x.state)).length} {$t.activeTransfers}</div></div>
-  <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="upload" size={16} /></span> {$t.uploadingLabel}</div><div class="stat-value">{bytes(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((s, x) => s + x.uploadSpeed, 0))}<small> /s</small></div></div>
-  <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="library" size={16} /></span> {$t.library}</div><div class="stat-value">{torrents.length}<small> torrents</small></div><div class="stat-foot">{torrents.filter((x) => x.progress >= 1).length} {$t.completedAvailable}</div></div>
-  <div class="stat-card"><div class="stat-label"><span class="accent"><Icon name="disk" size={16} /></span> {$t.availableSpace}</div><div class="stat-value">{storage.available !== undefined ? bytes(storage.available) : '—'}</div><div class="stat-foot">{$t.diskReserve}</div></div>
+{#snippet activity(values: number[])}
+  <svg class="activity-chart" viewBox="0 0 240 36" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+    <path class="chart-grid" d="M0 2H240 M0 17H240 M0 32H240" />
+    {#if values.length > 1}
+      <polygon points={`0,36 ${chartPoints(values, MAX_BANDWIDTH)} 240,36`} />
+      <polyline points={chartPoints(values, MAX_BANDWIDTH)} />
+    {/if}
+  </svg>
+{/snippet}
+<div class="stat-grid transfer-stats">
+  <section class="stat-card metric-card network-card" aria-label={$t.downloading}>
+    <div class="stat-label"><span class="metric-icon"><Icon name="download" size={17} /></span><span>{$t.downloading}</span><span class="metric-cap">{MAX_BANDWIDTH}<span class="cap-unit"> Mbit/s</span></span></div>
+    <MetricGauge value={downloadSpeed} maximum={MAX_BANDWIDTH} unit="Mbit/s" label={$t.downloading} />
+    {@render activity(history.map((sample) => sample.download))}
+  </section>
+  <section class="stat-card metric-card upload-card" aria-label={$t.uploadingLabel}>
+    <div class="stat-label"><span class="metric-icon"><Icon name="upload" size={17} /></span><span>{$t.uploadingLabel}</span><span class="metric-cap">{MAX_BANDWIDTH}<span class="cap-unit"> Mbit/s</span></span></div>
+    <MetricGauge value={uploadSpeed} maximum={MAX_BANDWIDTH} unit="Mbit/s" label={$t.uploadingLabel} />
+    {@render activity(history.map((sample) => sample.upload))}
+  </section>
+  <section class="stat-card metric-card services-card" aria-label={$t.serviceLoad}>
+    <div class="stat-label"><span class="metric-icon"><Icon name="settings" size={17} /></span><span>{$t.serviceLoad}</span><span class="metric-cap" title={$t.serviceCpuHelp}>CPU</span></div>
+    <div class="service-meters">
+      {#each serviceNames as service (service.id)}
+        {@const cpu = services.find((item) => item.id === service.id)?.cpuPercent ?? null}
+        <div class="service-meter" role="img" aria-label={`${service.name}: ${cpu === null ? $t.metricUnavailable : `${cpu.toLocaleString($language, { maximumFractionDigits: 1 })} % CPU`}`} title={$t.serviceCpuHelp}>
+          <div class="service-reading"><span>{service.name}</span><strong>{cpu === null ? '—' : cpu.toLocaleString($language, { maximumFractionDigits: 1 })}<small>{cpu === null ? '' : ' %'}</small></strong></div>
+          <div class="service-track"><span style:width={`${Math.min(100, Math.max(0, cpu ?? 0))}%`}></span></div>
+        </div>
+      {/each}
+    </div>
+  </section>
+  <section class={['stat-card metric-card disk-card', { 'disk-warning': diskUsage !== null && diskUsage >= 80, 'disk-danger': diskUsage !== null && diskUsage >= 90 }]} aria-label={$t.primaryDisk} title={storage.total ? `${bytes(storage.used ?? storage.total - storage.available)} / ${bytes(storage.total)}` : $t.metricUnavailable}>
+    <div class="stat-label"><span class="metric-icon"><Icon name="disk" size={17} /></span><span>{$t.primaryDisk}</span><span class="metric-cap">{$t.diskUsed}</span></div>
+    <MetricGauge value={diskUsage} unit="%" label={$t.primaryDisk} />
+    <div class="disk-segments" aria-hidden="true">{#each { length: 40 } as _, index (index)}<span class={{ filled: diskUsage !== null && index < diskUsage / 2.5, reserve: index >= 36 }}></span>{/each}</div>
+  </section>
 </div>
 <Notification bind:message={error} kind="error" />
 <Notification bind:message={notice} kind="success" />
@@ -82,6 +136,42 @@
 </section>
 <Modal bind:open={removeOpen} title={deleteData ? $t.delete : $t.remove}>{#if removal}<p><strong>{removal.name}</strong></p><p>{deleteData ? $t.deleteTorrentHelp : $t.removeTorrentHelp}</p><div class="dialog-actions"><button class="secondary" onclick={() => { removeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: deleteData }]} disabled={busy} onclick={() => removal && action(removal, deleteData ? 'delete' : 'remove', deleteData)}>{deleteData ? $t.deletePermanently : $t.remove}</button></div>{/if}</Modal>
 <style>
+  .transfer-stats{align-items:stretch}
+  .metric-card{--chart-color:var(--accent-ink);position:relative;overflow:hidden;background:linear-gradient(145deg,color-mix(in srgb,var(--chart-color) 7%,var(--surface-container)),var(--surface-container));border:1px solid color-mix(in srgb,var(--chart-color) 15%,var(--line));padding:16px 18px 12px}
+  .upload-card{--chart-color:light-dark(#366a87,#96c9e8)}
+  .services-card{--chart-color:light-dark(#6e5594,#c7b3e7)}
+  .disk-card{--chart-color:light-dark(#926326,#e5c18c)}
+  .disk-warning{--chart-color:var(--warning)}
+  .disk-danger{--chart-color:var(--danger)}
+  .metric-card .stat-label{gap:7px;margin-bottom:10px;white-space:nowrap;font-weight:500}
+  .metric-icon{display:flex;color:var(--chart-color)}
+  .metric-cap{margin-left:auto;font-size:10px;color:var(--muted);font-weight:400}
+  .activity-chart{display:block;width:100%;height:30px;margin-top:12px;overflow:visible;color:var(--chart-color)}
+  .chart-grid{stroke:var(--line);stroke-width:.6;opacity:.45;fill:none}
+  .activity-chart polygon{fill:currentColor;opacity:.13}
+  .activity-chart polyline{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+  .service-meters{display:grid;gap:9px;padding-top:3px}
+  .service-reading{display:flex;justify-content:space-between;gap:8px;font-size:11px;line-height:1.2;margin-bottom:5px}
+  .service-reading strong{font-weight:500;font-variant-numeric:tabular-nums}
+  .service-reading small{font-weight:400;color:var(--muted);font-size:10px}
+  .service-track{height:4px;border-radius:var(--shape-full);background:var(--surface-container-highest);overflow:hidden}
+  .service-track span{display:block;height:100%;background:var(--chart-color);border-radius:inherit;transition:width .6s ease}
+  .disk-segments{display:flex;gap:3px;height:22px;margin-top:20px;align-items:center}
+  .disk-segments span{flex:1;height:14px;min-width:0;border-radius:2px;background:var(--surface-container-highest)}
+  .disk-segments .reserve{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warning) 50%,transparent)}
+  .disk-segments .filled{background:var(--chart-color)}
+  @media(max-width:700px){
+    .transfer-stats{padding-bottom:0;border-bottom:0;gap:10px}
+    .transfer-stats .stat-card.metric-card{padding:12px;background:linear-gradient(145deg,color-mix(in srgb,var(--chart-color) 7%,var(--surface-container)),var(--surface-container));border-radius:var(--shape-lg)}
+    .metric-card .stat-label{font-size:11px;gap:5px}
+    .metric-cap{font-size:9px}
+    .metric-icon{display:none}
+    .service-meters{gap:8px}
+    .disk-segments{gap:2px}
+  }
+  @media(max-width:400px){.cap-unit,.disk-card .metric-cap{display:none}}
+  @media(prefers-reduced-motion:reduce){.service-track span{transition:none}}
+
   .torrent-add{margin-bottom:14px}
   .torrent-add summary{display:flex;align-items:center;gap:8px;min-height:48px;padding:12px 16px;background:var(--accent);color:var(--accent-text);border-radius:var(--shape-lg);cursor:pointer;list-style:none}
   .torrent-add summary:hover{background:color-mix(in srgb,var(--accent) 92%,var(--accent-text))}

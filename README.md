@@ -55,6 +55,7 @@ npm test
 npm run build
 python3 deploy/test_services.py
 node --test scripts/backup.test.mjs
+python3 scripts/backup-ftp.test.py
 docker compose --env-file .env.example config --no-env-resolution -q
 ```
 
@@ -65,6 +66,8 @@ Définir `TEST_DATABASE_URL` pour exécuter aussi les tests d'authentification s
 Suivre le guide Ubuntu 24.04 LTS et Docker en [français](docs/deployment.md) ou en [anglais](docs/deployment.en.md), puis [le guide de sauvegarde et migration depuis Meteor](docs/migration-backups.md) si nécessaire. L'installation couvre les ports, les secrets, PostgreSQL, les certificats HTTPS/FTPS, le premier administrateur, les sauvegardes et les mises à jour. Aucun script ne reformate un disque et aucun identifiant SSH n'est embarqué. Les services PostgreSQL et RPC qBittorrent ne publient aucun port. Les téléchargements HTTP passent par une autorisation de session, puis Nginx sert les fichiers.
 
 Les deux espaces sont collectifs : `downloads` est géré par qBittorrent et accessible en lecture via le site et FTPS ; `share` est modifiable via le site et FTPS. Le FTPS explicite utilise le port 21000 et exige TLS pour les commandes et les données.
+
+Une sauvegarde FTP chiffrée facultative peut partir directement du serveur chaque nuit, sans Mac allumé : PostgreSQL et configuration complets, puis les fichiers de `share` qui tiennent dans le quota, en commençant par les plus petits. Elle est désactivée par défaut ; le [guide de sauvegarde](docs/migration-backups.md#sauvegarde-ftp-automatique-depuis-le-serveur) décrit les clés `age`, le quota de 100 Go, la rétention et la restauration. Les téléchargements et l'état qBittorrent restent exclus.
 
 Les images et le fonctionnement sur le serveur doivent être validés avec les essais du guide avant ouverture. Les fichiers et anciens torrents du serveur historique ne sont pas inclus dans la migration des comptes.
 

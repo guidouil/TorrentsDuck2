@@ -84,12 +84,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     const { hashPassword } = await import('../src/lib/server/passwords');
     const hash = await hashPassword(password);
     const legacy = `meteor$${await bcrypt.hash(createHash('sha256').update(password).digest('hex'), 4)}`;
-    for (const [id, name, userEmail, role, stored] of [
-      [adminId, `${prefix}-admin`, `${prefix}+admin@example.org`, 'admin', hash],
-      [memberId, username, email, 'member', legacy],
-      [ftpId, `${prefix}-ftp`, `${prefix}+ftp@example.org`, 'member', `meteor$${await bcrypt.hash(createHash('sha256').update(password).digest('hex'), 4)}`]
+    for (const [id, name, userEmail, role, stored, createdAt] of [
+      [adminId, `${prefix}-admin`, `${prefix}+admin@example.org`, 'admin', hash, '2026-01-01'],
+      [memberId, username, email, 'member', legacy, '2026-01-03'],
+      [ftpId, `${prefix}-ftp`, `${prefix}+ftp@example.org`, 'member', `meteor$${await bcrypt.hash(createHash('sha256').update(password).digest('hex'), 4)}`, '2026-01-02']
     ]) {
-      await db.query('INSERT INTO "user"(id,name,username,"displayUsername",email,role,enabled,approved) VALUES ($1,$2,$2,$2,$3,$4,true,true)', [id, name, userEmail, role]);
+      await db.query('INSERT INTO "user"(id,name,username,"displayUsername",email,role,enabled,approved,"createdAt") VALUES ($1,$2,$2,$2,$3,$4,true,true,$5)', [id, name, userEmail, role, createdAt]);
       await db.query('INSERT INTO account(id,"accountId","providerId","userId",password) VALUES ($1,$2,\'credential\',$2,$3)', [randomUUID(), id, stored]);
     }
     authModule = await import('../src/lib/server/auth');
@@ -259,6 +259,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     const { users } = await response.json();
     expect(users.find((user: { id: string }) => user.id === memberId)).not.toHaveProperty('password');
     expect(users.find((user: { id: string }) => user.id === memberId)).not.toHaveProperty('legacyId');
+  });
+
+  it('lists accounts from newest to oldest', async () => {
+    const { users } = await (await adminRoutes.GET(event('/api/admin/users', undefined, adminCookie))).json();
+    expect(users.filter((user: { id: string }) => [adminId, memberId, ftpId].includes(user.id)).map((user: { id: string }) => user.id)).toEqual([memberId, ftpId, adminId]);
   });
 
   it('allows registration and login while refusing all services before approval', async () => {

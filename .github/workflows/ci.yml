@@ -26,4 +26,5 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y age
       - run: python3 deploy/test_services.py
       - run: node --test scripts/backup.test.mjs
+      - run: python3 scripts/backup-ftp.test.py
       - run: docker compose --env-file .env.example config --no-env-resolution -q

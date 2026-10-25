@@ -19,7 +19,7 @@ Vérifier les disques avec `lsblk` et, si un RAID est utilisé, ses outils de di
 ```sh
 sudo apt-get update
 sudo apt-get upgrade -y
-sudo apt-get install -y ca-certificates curl git python3 iptables openssl ufw
+sudo apt-get install -y ca-certificates curl git python3 age iptables openssl ufw
 ```
 
 Effectuer tout redémarrage système nécessaire avant de poursuivre.
@@ -148,7 +148,7 @@ sudo sh scripts/deploy.sh
 
 La première commande lit `ACME_EMAIL` depuis `.env` via Compose. Pour remplacer ponctuellement cette adresse : `sudo ACME_EMAIL=admin@example.com sh scripts/deploy-certificates.sh issue`. Le challenge ACME utilise un Nginx temporaire sur le port 80 ; après émission, le script prépare le PEM FTPS et démarre Nginx/FTPS et leurs dépendances avec le schéma déjà prêt.
 
-`scripts/deploy.sh` installe les unités systemd, applique le pare-feu, construit les images, attend PostgreSQL, applique les migrations puis démarre la pile. Il active aussi son démarrage au boot et le timer de renouvellement. Il conserve les données existantes et ne crée pas d'administrateur implicite.
+`scripts/deploy.sh` installe les unités systemd, applique le pare-feu, construit les images, attend PostgreSQL, applique les migrations puis démarre la pile. Il active aussi son démarrage au boot, le timer de renouvellement et celui de sauvegarde FTP ; les transferts de sauvegarde restent désactivés tant que `BACKUP_FTP_ENABLED=false`. Il conserve les données existantes et ne crée pas d'administrateur implicite.
 
 Pour une installation neuve, s'inscrire sur le site avec l'adresse configurée dans `ADMIN_EMAIL`, puis suivre le lien de confirmation reçu par mail pour activer l'administrateur. La page d'attente permet de renvoyer ce lien. Les autres comptes attendent la validation d'un administrateur. Modifier `ADMIN_EMAIL` ensuite ne change pas les comptes existants. Une inscription prévient les administrateurs actifs et validés ; à défaut, `ADMIN_EMAIL` reçoit la notification si elle est définie. Un échec d'envoi est journalisé et n'annule pas l'inscription.
 
@@ -160,6 +160,7 @@ sudo docker compose logs --tail=100 web nginx ftp qbittorrent postgres
 sudo docker compose exec -T nginx nginx -t
 sudo systemctl status torrentduck.service torrentduck-firewall.service --no-pager
 sudo systemctl list-timers torrentduck-certificates.timer --no-pager
+sudo systemctl list-timers torrentduck-backup.timer --no-pager
 curl -fsS https://duck.example.com/api/health
 ```
 
@@ -200,6 +201,8 @@ Le gardien FTPS vérifie les autorisations toutes les 5 secondes, avec un délai
 
 Les journaux Docker sont limités à 3 × 10 Mo par service. Nginx désactive son journal d'accès pour protéger les jetons des liens de lecture et de récupération. L'application n'a pas accès au socket Docker.
 
+La carte CPU de la page Transferts mesure Web, qBittorrent, PostgreSQL, Nginx et FTPS en pourcentage de la capacité CPU totale de l'hôte (100 % = tous les cœurs occupés). Le relevé compare les compteurs [`cpu.stat` de cgroup v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#cpu-interface-files) entre deux instantanés partagés, environ toutes les 3 secondes lorsque la page est ouverte. `compose.yaml` place chaque service dans une slice `torrentduck-<service>.slice` et monte `/sys/fs/cgroup` dans `web` en lecture seule ; aucun droit d'écriture ni socket Docker n'est ajouté. Ces relevés utilisent le pilote cgroup `systemd` et cgroup v2 d'Ubuntu 24.04 : vérifier `sudo docker info --format '{{.CgroupVersion}} {{.CgroupDriver}}'` (résultat attendu : `2 systemd`). Après la mise à jour, les conteneurs doivent être recréés par le déploiement pour appliquer ces paramètres. Un premier relevé, un service absent ou une configuration différente affiche une valeur indisponible ; la pile Docker locale garde sa configuration portable et ne fournit pas ces compteurs. Le remplissage et la réserve de 10 % sont calculés sur le système de fichiers de `DOWNLOADS_DIR` (le dossier `downloads` de `DATA_ROOT` sur l’hôte), afin de mesurer le disque de données même lorsqu’il est monté séparément du système. Le remplissage exclut les espaces encore libres réservés par le système de fichiers ; le seuil applicatif de 10 % reste inchangé.
+
 Sur un poste de sauvegarde avec Node 24, `age` et une identité SSH adaptée, créer une clé `age` hors du dépôt, garder une seconde copie protégée de sa clé privée, puis utiliser son destinataire public :
 
 ```sh
@@ -210,7 +213,35 @@ age-keygen -y "$HOME/.config/torrentduck/backup-identity.txt"
 node scripts/backup.mjs --host backup-host --recipient age1… --directory "$HOME/TorrentsDuck-backups" --keep 14
 ```
 
-Remplacer `backup-host` par un alias SSH configuré et `age1…` par la clé publique obtenue. Le compte distant doit lire la configuration et utiliser Docker, ce qui lui donne un accès administrateur sur l'hôte. Le [guide de sauvegarde](migration-backups.md) détaille ces droits et les essais de restauration. L'archive contient PostgreSQL et la configuration ; téléchargements, fichiers partagés et état des torrents sont exclus et nécessitent une stratégie séparée si leur conservation est requise. La dernière sauvegarde récupérée apparaît dans l'administration ; un poste éteint laisse cette date vieillir.
+Remplacer `backup-host` par un alias SSH configuré et `age1…` par la clé publique obtenue. Le compte distant doit lire la configuration et utiliser Docker, ce qui lui donne un accès administrateur sur l'hôte. Le [guide de sauvegarde](migration-backups.md) détaille ces droits et les essais de restauration. Cette sauvegarde SSH contient PostgreSQL et la configuration ; téléchargements, fichiers partagés et état des torrents en sont exclus. La dernière sauvegarde enregistrée apparaît dans l'administration ; sans autre sauvegarde, un poste éteint laisse cette date vieillir.
+
+### Sauvegarde FTP automatique facultative
+
+Le serveur peut envoyer sa propre archive chiffrée sans dépendre du poste de sauvegarde. Il utilise Python 3, Docker Compose et `age` sur l'hôte ; seule la clé publique `age1…` obtenue ci-dessus va sur le serveur. Si aucune clé n'existe encore, la créer d'abord sur le poste de sauvegarde suivant le [guide de sauvegarde](migration-backups.md#clé-de-sauvegarde-sur-le-mac). Garder la clé privée et sa seconde copie protégée hors de cet hôte. Laisser `BACKUP_FTP_ENABLED=false` tant que `BACKUP_AGE_RECIPIENT` n'est pas renseigné : les identifiants FTP seuls ne suffisent pas.
+
+Éditer les variables suivantes dans `.env` sans charger ce fichier dans le shell ; Compose les résout dans `x-backup-ftp`. Ne jamais afficher la configuration résolue contenant les identifiants.
+
+| Variable | Valeur |
+| --- | --- |
+| `BACKUP_FTP_ENABLED` | `true` pour activer ; `false` par défaut. |
+| `BACKUP_FTP_HOST`, `BACKUP_FTP_USER`, `BACKUP_FTP_PASSWORD` | Hôte et identifiants fournis par le service de sauvegarde. |
+| `BACKUP_FTP_PORT` | `21` par défaut. |
+| `BACKUP_FTP_TLS` | `false` par défaut ; `true` impose le FTPS explicite avec vérification du certificat. |
+| `BACKUP_FTP_DIRECTORY` | `torrents-duck` par défaut ; dossier dédié à cette installation. |
+| `BACKUP_AGE_RECIPIENT` | Clé publique `age1…` ; jamais la clé privée. |
+| `BACKUP_FTP_QUOTA_BYTES` | `100000000000` par défaut (100 Go décimaux). |
+| `BACKUP_FTP_KEEP` | `1` par défaut. |
+
+L'archive contient la base et la configuration complètes, puis les fichiers ordinaires de `share` par taille croissante dans la place restante. `backup-manifest.json` indique les fichiers retenus, le nombre et le volume écartés par manque de place, ainsi que le nombre d'entrées écartées pour sécurité ; `downloads` et l'état qBittorrent restent exclus. Le budget par archive est au plus `quota / (keep + 1)`, soit 50 Go par défaut, afin de garder l'ancienne copie pendant l'envoi. Les autres fichiers du dossier FTP comptent aussi ; réduire le quota si le même compte sert à d'autres usages. Le script envoie sous nom `.partial`, contrôle la taille, renomme puis relit entièrement l'archive distante pour comparer son SHA256 à celui de la copie locale. Ce contrôle implique un aller-retour complet de l'archive sur le réseau. L'enregistrement de réussite dans l'application précède la purge des seules anciennes archives du script.
+
+Une archive chiffrée temporaire est préparée dans `DATA_ROOT/backup-ftp`, avec un budget calculé au départ pour laisser 10 % d'espace libre ; dump et configuration en clair restent dans `/dev/shm`. Après déploiement, le timer lance la sauvegarde chaque jour à 03 h 30, heure du serveur, avec jusqu'à 30 minutes de délai aléatoire. Tester un envoi puis une restauration isolée suivant le [guide de sauvegarde](migration-backups.md#sauvegarde-ftp-automatique-depuis-le-serveur) :
+
+```sh
+sudo systemctl start torrentduck-backup.service
+sudo journalctl -u torrentduck-backup.service -n 50 --no-pager
+```
+
+Pour Dedibackup, envoyer depuis le réseau Dedibox et conserver au plus 1 000 fichiers sur le compte. Le FTP sans TLS transmet les identifiants en clair ; `age` protège le contenu de l'archive. Utiliser les paramètres et contraintes de la [documentation Scaleway](https://www.scaleway.com/en/docs/dedibox/how-to/use-dedibackup-ftp-backup/). Ce FTP sortant est indépendant du FTPS obligatoire pour les membres.
 
 ## Mettre à jour
 

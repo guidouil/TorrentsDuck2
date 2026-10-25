@@ -80,6 +80,13 @@ describe('file type icons', () => {
 });
 
 describe('file explorer URL navigation', () => {
+  it('defaults to sorting by date when no sort is selected', async () => {
+    const files = explorer(origin);
+    expect(files.state().sort).toBe('modifiedAt');
+    await files.loadFiles();
+    expect(new URL(files.api.mock.calls[0][0], origin).searchParams.get('sort')).toBe('modifiedAt');
+  });
+
   it.each([undefined, shared])('loads a bookmarked or shallow URL with all its explorer state (%s)', async (shallowUrl) => {
     const files = explorer(shallowUrl ? origin : shared, shallowUrl);
     expect(files.state()).toMatchObject({ space: 'share', path: 'Films/Été 2026', query: 'version longue', sort: 'size', offset: 50 });

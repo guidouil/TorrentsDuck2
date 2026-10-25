@@ -1,11 +1,12 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { RequestEvent } from '@sveltejs/kit';
 
-const mocked = vi.hoisted(() => ({ list: vi.fn(), qbt: vi.fn(), authors: vi.fn(), storage: vi.fn(), member: vi.fn(), query: vi.fn() }));
+const mocked = vi.hoisted(() => ({ list: vi.fn(), qbt: vi.fn(), authors: vi.fn(), storage: vi.fn(), member: vi.fn(), query: vi.fn(), metrics: vi.fn() }));
 vi.mock('../src/lib/server/db', () => ({ query: mocked.query }));
 vi.mock('../src/lib/server/qbittorrent', () => ({ listTorrents: mocked.list, qbt: mocked.qbt, syncAuthors: mocked.authors }));
 vi.mock('../src/lib/server/storage', () => ({ storageStatus: mocked.storage }));
 vi.mock('../src/lib/server/permissions', () => ({ requireMember: mocked.member }));
+vi.mock('../src/lib/server/metrics', () => ({ serviceMetrics: mocked.metrics }));
 
 beforeEach(() => {
 	vi.resetModules();
@@ -16,6 +17,7 @@ beforeEach(() => {
 	mocked.storage.mockReset().mockResolvedValue({ total: 100, available: 50, reserved: 10, usable: 40, canDownload: true });
 	mocked.member.mockReset().mockResolvedValue({ id: 'member', enabled: true });
 	mocked.query.mockReset().mockResolvedValue([{ hash: 'a'.repeat(40), user_id: 'member' }]);
+	mocked.metrics.mockReset().mockResolvedValue({ cpuCount: 4, services: [{ id: 'web', cpuPercent: 12.5 }] });
 });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -27,6 +29,9 @@ describe('shared live snapshot', () => {
 		expect(a).toBe(b);
 		expect(a.torrents[0]).toMatchObject({ authorId: 'member', peers: 5, downloadSpeed: 2 });
 		expect(a.storage.canDownload).toBe(true);
+		expect(a.sampledAt).toBe(Date.now());
+		expect(a.metrics).toEqual({ cpuCount: 4, services: [{ id: 'web', cpuPercent: 12.5 }] });
+		expect(mocked.metrics).toHaveBeenCalledOnce();
 	});
 	it('pauses incomplete transfers before the reserve is consumed, without resuming completed seeders', async () => {
 		mocked.storage.mockResolvedValue({ total: 100, available: 10, reserved: 10, usable: 0, canDownload: false });

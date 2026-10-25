@@ -4,13 +4,14 @@ import { query } from './db';
 import { listTorrents, qbt, syncAuthors } from './qbittorrent';
 import { storageStatus } from './storage';
 import { requireMember } from './permissions';
+import { serviceMetrics } from './metrics';
 
 let cached: { time: number; data: Awaited<ReturnType<typeof loadSnapshot>> } | undefined;
 let pending: Promise<Awaited<ReturnType<typeof loadSnapshot>>> | undefined;
 
 async function loadSnapshot() {
-	const [raw, transfer, storage] = await Promise.all([
-		listTorrents(), qbt('transfer/info').then((response) => response.json()) as Promise<{ dl_info_speed: number; up_info_speed: number; dl_info_data: number; up_info_data: number; connection_status: string }>, storageStatus()
+	const [raw, transfer, storage, metrics] = await Promise.all([
+		listTorrents(), qbt('transfer/info').then((response) => response.json()) as Promise<{ dl_info_speed: number; up_info_speed: number; dl_info_data: number; up_info_data: number; connection_status: string }>, storageStatus(), serviceMetrics()
 	]);
 	if (!storage.canDownload) {
 		const active = raw.filter((torrent) => torrent.progress < 1 && !/^(stopped|paused)/.test(torrent.state));
@@ -25,6 +26,7 @@ async function loadSnapshot() {
 		authorId: authors.get(torrent.hash) ?? null
 	}));
 	return {
+		sampledAt: Date.now(), metrics,
 		torrents, stats: {
 			downloadSpeed: transfer.dl_info_speed, uploadSpeed: transfer.up_info_speed,
 			downloaded: transfer.dl_info_data, uploaded: transfer.up_info_data,

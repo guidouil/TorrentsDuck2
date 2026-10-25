@@ -11,7 +11,7 @@ age-keygen -o "$HOME/.config/torrentduck/backup-identity.txt"
 age-keygen -y "$HOME/.config/torrentduck/backup-identity.txt"
 ```
 
-Copier la ligne publique `age1…` dans les commandes suivantes. Conserver une seconde copie protégée de la clé privée : sans elle, les sauvegardes ne sont pas récupérables. Ne pas envoyer cette clé dans une conversation.
+Copier la ligne publique `age1…` dans les commandes suivantes, ou dans `BACKUP_AGE_RECIPIENT` pour la sauvegarde FTP. Si aucune identité n'existe encore, cette création est nécessaire avant l'activation du FTP ; les identifiants FTP seuls ne permettent pas de chiffrer une archive. Conserver une seconde copie protégée de la clé privée : sans elle, les sauvegardes ne sont pas récupérables. Ne pas envoyer cette clé dans une conversation.
 
 ## Exporter avant tout effacement
 
@@ -82,6 +82,43 @@ Le script attend la fin réussie de SSH et age, synchronise le fichier, refuse d
 
 L'exécution peut être attachée au planificateur du Mac en utilisant des chemins absolus vers Node, le dépôt et la destination. Une machine éteinte ou sans réseau ne sauvegarde pas. La date affichée dans l'administration rend ce retard visible, sans promettre une sauvegarde indépendante du Mac.
 
+## Sauvegarde FTP automatique depuis le serveur
+
+Cette option envoie une archive `age` directement depuis le nouveau serveur. Elle complète la récupération SSH par le Mac, dont le périmètre reste inchangé. Le serveur nécessite Python 3, Docker Compose et `age` (`sudo apt-get install -y age` sur Ubuntu). Créer la clé sur le poste de sauvegarde avec la procédure en début de guide ; copier seulement sa ligne publique `age1…` dans la configuration du serveur. Ne conserver aucune clé privée de déchiffrement sur le serveur de production ou l'espace FTP.
+
+Après activation de l'espace de sauvegarde chez le fournisseur, éditer les variables `BACKUP_FTP_*` et `BACKUP_AGE_RECIPIENT` de `.env` ; ne pas charger `.env` dans un shell ni afficher la configuration résolue. Laisser `BACKUP_FTP_ENABLED=false` tant que la clé publique n'a pas été créée et renseignée. Les valeurs ci-dessous sont fictives :
+
+```dotenv
+BACKUP_FTP_ENABLED=true
+BACKUP_FTP_HOST=backup.example.com
+BACKUP_FTP_PORT=21
+BACKUP_FTP_USER=backup-user
+BACKUP_FTP_PASSWORD='replace-with-a-unique-secret'
+BACKUP_FTP_TLS=false
+BACKUP_FTP_DIRECTORY=torrents-duck
+BACKUP_AGE_RECIPIENT=age1…
+BACKUP_FTP_QUOTA_BYTES=100000000000
+BACKUP_FTP_KEEP=1
+```
+
+`BACKUP_FTP_ENABLED` vaut `false` par défaut. La configuration est lue par Compose dans l'extension `x-backup-ftp`. `BACKUP_FTP_TLS=true` impose le FTPS explicite et un certificat valide ; utiliser le protocole réellement proposé par le fournisseur. Le FTP sans TLS transmet les identifiants en clair, même si le contenu est chiffré par `age`. Pour Dedibackup, les envois doivent provenir du réseau Dedibox et le compte est limité à 1 000 fichiers : vérifier hôte, accès et contraintes dans la [documentation Scaleway](https://www.scaleway.com/en/docs/dedibox/how-to/use-dedibackup-ftp-backup/). Ce service sortant est distinct du FTPS des membres.
+
+Chaque archive contient toujours le dump PostgreSQL complet et la configuration `.env`, Compose et `deploy/`. Elle inclut ensuite les fichiers ordinaires de `share` par taille croissante dans le budget disponible ; les gros fichiers peuvent donc être absents. `downloads` et l'état qBittorrent ne sont jamais inclus. Le fichier `backup-manifest.json` de l'archive recense les chemins et tailles sélectionnés, leur nombre (`included`), le volume total des fichiers ordinaires candidats (`totalBytes`), le nombre (`excludedForSpace`) et le volume (`excludedBytes`) écartés par manque de place, et le nombre d'entrées écartées pour sécurité (`excludedUnsafe`, notamment les liens). Vérifier ce manifeste avant de considérer le Partage comme sauvegardé ; cette copie de fichiers actifs ne constitue pas un instantané cohérent avec le dump PostgreSQL.
+
+Le budget de chaque archive est au plus `BACKUP_FTP_QUOTA_BYTES / (BACKUP_FTP_KEEP + 1)`. Par défaut, 100 Go décimaux et une copie conservée donnent au plus 50 Go par archive, base, configuration, manifeste et chiffrement compris : l'ancienne copie reste disponible pendant la création de la nouvelle. Si même la base et la configuration complètes ne tiennent pas, la sauvegarde échoue. Utiliser un dossier FTP dédié ; les fichiers inconnus présents dans ce dossier sont comptés sans être supprimés. Le script ne connaît pas l'occupation du reste du compte : réduire le quota configuré si d'autres usages y consomment de la place.
+
+Seule une copie temporaire chiffrée est écrite dans `DATA_ROOT/backup-ftp`, avec un budget calculé au départ pour laisser la réserve disque de 10 %. Le dump et la configuration temporaires en clair restent dans le répertoire privé de `/dev/shm`. L'envoi utilise un nom `.partial`, contrôle la taille distante puis renomme l'archive. Le script relit ensuite entièrement le fichier distant avec `RETR`, en flux, pour vérifier que son SHA256 correspond à celui de la copie locale chiffrée ; prévoir le trafic d'un envoi et d'un téléchargement complets par sauvegarde. L'application doit ensuite enregistrer la réussite avant toute purge des anciennes archives du script. Si cet enregistrement échoue, la nouvelle copie peut déjà être présente sur FTP alors que la date de l'administration n'a pas avancé ; examiner les archives avant de relancer. Aucun fichier inconnu n'est purgé.
+
+`scripts/deploy.sh` installe le service et le timer systemd. Le timer s'exécute chaque jour à 03 h 30, heure du serveur, avec jusqu'à 30 minutes de délai aléatoire ; sans activation dans `.env`, aucun transfert n'est effectué. Depuis la racine du dépôt sur le serveur :
+
+```sh
+sudo systemctl start torrentduck-backup.service
+sudo systemctl list-timers torrentduck-backup.timer --no-pager
+sudo journalctl -u torrentduck-backup.service -n 50 --no-pager
+```
+
+Pour un lancement manuel sans systemd, utiliser `sudo python3 scripts/backup-ftp.py`. Vérifier un premier envoi, récupérer l'archive chiffrée sur le poste de sauvegarde et effectuer les essais de restauration ci-dessous. La présence d'une archive et la date d'administration ne prouvent pas à elles seules sa restauration.
+
 ## Restauration et essais
 
 Vérifier l'archive avant toute restauration. Pour une base PostgreSQL 17 vide sur une installation de test, **avant la création du schéma** :
@@ -93,9 +130,24 @@ node scripts/restore-backup.mjs database "$HOME/TorrentsDuck-backups/COPIE.tar.a
 
 Cette commande ne détruit aucune base existante pour forcer la restauration : si des tables existent, elle échoue. Utiliser une base de test neuve. Restaurer la configuration dans un dossier temporaire privé après vérification, examiner les domaines, chemins et secrets, puis copier les seuls fichiers nécessaires ; ne pas écraser `.env` d'une production en cours.
 
+Pour examiner une archive FTP récupérée sur le poste de sauvegarde, vérifier d'abord tout son chiffrement, puis extraire dans un **nouveau dossier privé**, jamais dans le `share` actif ni dans le dépôt :
+
+```sh
+set -o pipefail
+umask 077
+archive="$HOME/TorrentsDuck-backups/COPIE.tar.age"
+identity="$HOME/.config/torrentduck/backup-identity.txt"
+restore_dir=$(mktemp -d "$HOME/TorrentsDuck-restore.XXXXXX")
+node scripts/restore-backup.mjs verify "$archive" --identity "$identity" &&
+  age --decrypt --identity "$identity" "$archive" | tar -x -f - -C "$restore_dir"
+```
+
+Dans ce dossier isolé, examiner `backup-manifest.json`, `share/` et `config/`, et comparer les fichiers restaurés aux fichiers sélectionnés. Des fichiers de Partage ignorés par le quota ne peuvent pas être restaurés depuis cette archive. Tester le dump avec la commande PostgreSQL ci-dessus ; ne recopier dans le Partage collectif que les fichiers nécessaires après examen et sans écraser de données existantes. Garder la configuration et ses secrets dans le dossier privé jusqu'à leur suppression.
+
 ```sh
 python3 deploy/test_services.py
 node --test scripts/backup.test.mjs
+python3 scripts/backup-ftp.test.py
 ```
 
-Le test age fait un aller-retour chiffré avec un compte accentué puis corrompt l'archive et vérifie que la restauration échoue sans émettre de JSON. Il est explicitement ignoré si `age` n'est pas installé. Ces essais ne remplacent pas un test PostgreSQL restauré ni la vérification des comptes et droits de l'installation migrée.
+Le test age fait un aller-retour chiffré avec un compte accentué puis corrompt l'archive et vérifie que la restauration échoue sans émettre de JSON. Il est explicitement ignoré si `age` n'est pas installé. Les tests Python FTP vérifient hors ligne la sélection, les contrôles d'intégrité et la rétention, ainsi qu'un aller-retour d'archive lorsque `age` est disponible ; ils ne valident pas un envoi réel chez le fournisseur. Ces essais ne remplacent pas un test PostgreSQL restauré ni la vérification des comptes et droits de l'installation migrée.
