@@ -79,9 +79,8 @@
     {@render activity(history.map((sample) => sample.upload), peaks.upload)}
   </section>
   <section class={['stat-card metric-card disk-card', { 'disk-warning': diskUsage !== null && diskUsage >= 80, 'disk-danger': diskUsage !== null && diskUsage >= 90 }]} aria-label={$t.primaryDisk}>
-    <div class="stat-label"><span class="metric-icon"><Icon name="disk" size={17} /></span><span>{$t.primaryDisk}</span></div>
+    <div class="stat-label"><span class="metric-icon"><Icon name="disk" size={17} /></span><span>{$t.primaryDisk}</span><span class="metric-cap">{diskUsage === null ? '— / —' : `${bytes(storage.used ?? storage.total - storage.available)} / ${bytes(storage.total)}`}</span></div>
     <MetricGauge value={diskUsage} unit="%" label={$t.primaryDisk} />
-    <div class="disk-capacity">{diskUsage === null ? '— / —' : `${bytes(storage.used ?? storage.total - storage.available)} / ${bytes(storage.total)}`}</div>
     <div class="disk-segments" aria-hidden="true">{#each { length: 40 } as _, index (index)}<span class={{ filled: diskUsage !== null && index < diskUsage / 2.5, reserve: index >= 36 }}></span>{/each}</div>
   </section>
   <section class="stat-card metric-card services-card" aria-label={$t.serviceLoad}>
@@ -159,7 +158,6 @@
   .service-reading small{font-weight:400;color:var(--muted);font-size:10px}
   .service-track{height:4px;border-radius:var(--shape-full);background:var(--surface-container-highest);overflow:hidden}
   .service-track span{display:block;height:100%;background:var(--chart-color);border-radius:inherit;transition:width .6s ease}
-  .disk-capacity{text-align:center;margin-top:8px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
   .disk-segments{display:flex;gap:3px;height:22px;margin-top:8px;align-items:center}
   .disk-segments span{flex:1;height:14px;min-width:0;border-radius:2px;background:var(--surface-container-highest)}
   .disk-segments .reserve{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warning) 50%,transparent)}
