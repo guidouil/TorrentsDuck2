@@ -310,7 +310,8 @@ dialog p { overflow-wrap: anywhere; font-size: 14px; color: var(--muted); line-h
   .app-shell main .file-glyph { background: transparent; color: var(--accent-ink); border-radius: 0; }
   .app-shell .toolbar, .app-shell .panel-bottom { padding-inline: 0; }
   .chat-messages { padding-inline: 0; }
-  .chat-entry { grid-template-columns: 7ch 9ch minmax(0, 1fr); gap: 6px; font-size: 13px; }
+  .chat-entry { grid-template-columns: max-content 10ch minmax(0, 1fr); gap: 0; font-size: 13px; }
+  .chat-entry p { margin-inline-start: 6px; }
   .chat-form { padding-inline: 0; background: transparent; border-top: 1px solid var(--line); }
 }
 @media (prefers-reduced-motion: reduce) {
