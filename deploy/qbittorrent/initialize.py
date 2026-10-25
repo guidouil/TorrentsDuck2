@@ -2,6 +2,7 @@
 import base64
 import configparser
 import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -47,5 +48,26 @@ def configure(root, username, password):
     os.replace(temporary, path)
 
 
+def install_search_sources(data_root, sources_root):
+    sources = Path(sources_root)
+    engines = Path(data_root) / "qBittorrent" / "nova3" / "engines"
+    marker = engines.parent / ".torrentduck-sources-initialized"
+    if marker.exists():
+        return
+    engines.mkdir(parents=True, exist_ok=True)
+    for source in json.loads((sources / "catalog.json").read_text()):
+        if source["initial"]:
+            temporary = engines / (source["id"] + ".new")
+            temporary.write_bytes((sources / (source["id"] + ".py")).read_bytes())
+            try:
+                os.link(temporary, engines / (source["id"] + ".py"))
+            except FileExistsError:
+                pass
+            finally:
+                temporary.unlink()
+    marker.touch()
+
+
 if __name__ == "__main__":
     configure(os.environ.get("XDG_CONFIG_HOME", "/config"), os.environ.get("QBT_USERNAME"), os.environ.get("QBT_PASSWORD"))
+    install_search_sources(os.environ.get("XDG_DATA_HOME", "/config/data"), "/usr/local/share/torrentduck/search")

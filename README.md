@@ -12,6 +12,31 @@ Dans l’explorateur, l’action « Ouvrir dans VLC » prépare un lien de lectu
 
 Les jauges de transfert utilisent les pics de réception et d’envoi observés par le serveur. Ces deux maxima sont conservés dans une seule ligne PostgreSQL, commune à tous les navigateurs, et remplacés seulement lorsqu’ils sont dépassés ; aucun historique de débits n’est enregistré. Sur une installation existante, appliquer le schéma avec la commande `db:migrate` ci-dessous avant de redémarrer la nouvelle version.
 
+La page Recherche permet de trouver des torrents puis de les ajouter aux
+transferts collectifs. Le catalogue initial comprend The Pirate Bay, Torrents CSV,
+Nyaa.si et LimeTorrents ; Snowfl est disponible en installation facultative. Un administrateur
+peut attribuer à certains membres le droit supplémentaire « Gestionnaire des
+sources » pour installer, activer, désactiver ou retirer les plugins du catalogue.
+Les versions sont incluses dans l'image qBittorrent et leurs
+[sources et licences](deploy/qbittorrent/search/SOURCES.md) sont conservées dans
+le dépôt. La disponibilité des indexeurs externes peut varier.
+
+Les gestionnaires peuvent aussi ajouter une source par URL, avec détection
+JSON, RSS/Atom/Torznab ou HTML contenant des magnets, fichiers torrent ou hashes
+reconnus. Utiliser `{query}` pour les mots-clés, ou une liste/un flux fixe filtré
+par nom. L'authentification HTTP Basic, Bearer ou `X-Api-Key` est facultative et
+exige HTTPS. URL et identifiants sont chiffrés côté serveur ; les sources et leurs
+accès sont partagés entre les membres approuvés. En cas d'échec, copier le rapport
+de détection depuis Sources ou Recherche pour demander un nouvel adaptateur.
+Voir les [limites et la procédure](docs/deployment.md#recherche-et-sources).
+Appliquer `db:migrate` sur une installation existante pour créer `search_sources`.
+
+Les tris (seeders, leechers, date récente, taille ou nom) et les filtres de
+seeders minimum et de taille s'appliquent avant pagination sur un maximum de
+2 000 résultats ; une limite atteinte est signalée. La recherche peut cibler une
+source ou toutes les sources actives. Les dates non fournies par le moteur
+restent inconnues ; celles de Snowfl et LimeTorrents sont approximatives lorsqu'elles existent.
+
 ## Docker local
 
 Avec Docker, Compose et npm disponibles, lancer depuis la racine du dépôt :
@@ -33,7 +58,7 @@ npm run local:up    # Reconstruire et redémarrer après une modification du cod
 
 Les données restent dans des volumes nommés dédiés à cette pile locale, y compris après `local:down`. Seul le site publie un port, sur `127.0.0.1:5180` ; PostgreSQL et le RPC qBittorrent restent internes. Le port `5180` et le sous-réseau Docker `172.30.20.0/24` doivent être libres. Une autre pile Torrents Duck ne peut pas utiliser ce sous-réseau en parallèle ; arrêter ses conteneurs sans libérer son réseau ne suffit pas.
 
-Cette configuration utilise des identifiants fictifs pour les essais locaux, sans Nginx, FTPS ni envoi de mails réels. qBittorrent fonctionne sur un réseau interne sans accès aux pairs Internet : les essais du moteur utilisent des torrents de test et des appels API locaux, sans téléchargement public.
+Cette configuration utilise des identifiants fictifs pour les essais locaux, sans Nginx, FTPS ni envoi de mails réels. qBittorrent fonctionne sur un réseau interne sans accès aux pairs ni aux indexeurs Internet : les essais du moteur utilisent des torrents de test, des résultats de recherche simulés et des appels API locaux, sans téléchargement public.
 
 ## Développement
 
@@ -79,4 +104,6 @@ Les issues et pull requests peuvent décrire un problème reproductible ou une a
 
 ## Licence
 
-Sous [licence Apache 2.0](LICENSE), comme le projet TorrentsDuck d'origine.
+Sous [licence Apache 2.0](LICENSE), comme le projet TorrentsDuck d'origine. Les
+[plugins de recherche tiers](deploy/qbittorrent/search/SOURCES.md) conservent
+leurs licences BSD, MIT ou GPL, incluses avec leurs sources.

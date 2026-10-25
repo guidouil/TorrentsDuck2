@@ -11,7 +11,7 @@ vi.mock('../src/lib/server/rate-limit', () => ({ rateLimit: vi.fn() }));
 
 import { POST } from '../src/routes/api/registration/+server';
 
-const body = { username: 'TestAdmin', email: 'admin@example.com', password: 'a-long-test-password', role: 'admin', approved: true };
+const body = { username: 'TestAdmin', email: 'admin@example.com', password: 'a-long-test-password', role: 'admin', approved: true, canManageSources: true };
 
 function event(value: unknown = body): RequestEvent<Record<string, never>, '/api/registration'> {
   return {
@@ -51,11 +51,12 @@ describe('public registration administrator configuration', () => {
     expect(mocks.transaction.mock.invocationCallOrder[0]).toBeLessThan(mocks.sendVerificationEmail.mock.invocationCallOrder[0]);
   });
 
-  it.each([undefined, '', 'someone-else@example.org'])('ignores submitted role and approval when ADMIN_EMAIL is %s', async (adminEmail) => {
+  it.each([undefined, '', 'someone-else@example.org'])('ignores submitted role, approval and source permissions when ADMIN_EMAIL is %s', async (adminEmail) => {
     vi.stubEnv('ADMIN_EMAIL', adminEmail);
     const response = await POST(event());
     expect(await response.json()).toEqual({ registered: true });
     expect(insertedUser()?.[1]).toEqual([expect.any(String), body.username, body.email, 'member']);
+    expect(insertedUser()?.[0]).not.toContain('canManageSources');
     expect(mocks.sendVerificationEmail).not.toHaveBeenCalled();
   });
 

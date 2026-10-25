@@ -8,9 +8,13 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 def load(name, relative):
@@ -268,6 +272,99 @@ esac
             self.assertEqual(key, hashlib.pbkdf2_hmac("sha512", b"a long production RPC password!", salt, 100000, 64))
             self.assertIn("LocalHostAuth=true", text)
             self.assertNotIn("a long production RPC password!", text)
+
+    def test_qbt_sources_bootstrap_preserves_existing_and_removed_plugins(self):
+        sources = Path(__file__).parent / "qbittorrent/search"
+        catalogue = json.loads((sources / "catalog.json").read_text())
+        self.assertEqual(len({source["id"] for source in catalogue}), len(catalogue))
+        for source in catalogue:
+            self.assertTrue((sources / (source["id"] + ".py")).is_file())
+        with tempfile.TemporaryDirectory() as root:
+            engines = Path(root) / "qBittorrent/nova3/engines"
+            engines.mkdir(parents=True)
+            (engines / "piratebay.py").write_text("existing plugin\n")
+            qbt.install_search_sources(root, sources)
+            self.assertEqual((engines / "piratebay.py").read_text(), "existing plugin\n")
+            self.assertEqual((engines / "nyaasi.py").read_bytes(), (sources / "nyaasi.py").read_bytes())
+            self.assertTrue((engines / "torrentscsv.py").is_file())
+            self.assertTrue((engines / "limetorrents.py").is_file())
+            self.assertFalse((engines / "snowfl.py").exists())
+            (engines / "nyaasi.py").unlink()
+            qbt.install_search_sources(root, sources)
+            self.assertFalse((engines / "nyaasi.py").exists())
+            self.assertEqual((engines / "piratebay.py").read_text(), "existing plugin\n")
+
+    def test_bundled_search_plugins_parse_fixture_results(self):
+        results = []
+        helpers = types.SimpleNamespace(retrieve_url=lambda url: "", htmlentitydecode=lambda value: value)
+        printer = types.SimpleNamespace(prettyPrinter=results.append)
+        magnet = "magnet:?xt=urn:btih:" + "a" * 40
+        with patch.dict(sys.modules, {"helpers": helpers, "novaprinter": printer}):
+            piratebay = load("piratebay", "qbittorrent/search/piratebay.py").piratebay()
+            piratebay.retrieve_url = lambda url: json.dumps([{
+                "id": "42", "name": "Fixture", "info_hash": "a" * 40,
+                "size": "1024", "seeders": "2", "leechers": "1", "added": "1",
+            }])
+            piratebay.search("fixture")
+            self.assertTrue(results.pop()["link"].startswith(magnet))
+
+            helpers.retrieve_url = lambda url: json.dumps({"torrents": [{
+                "name": "Fixture", "infohash": "a" * 40, "size_bytes": 1024,
+                "seeders": 2, "leechers": 1, "created_unix": 1,
+            }]})
+            load("torrentscsv", "qbittorrent/search/torrentscsv.py").torrentscsv().search("fixture")
+            self.assertTrue(results.pop()["link"].startswith(magnet))
+
+            helpers.retrieve_url = lambda url: (
+                '<tr><td><a title="Fixture" href="/view/42">Fixture</a></td>'
+                f'<td><a href="{magnet}">magnet</a></td><td>1 MiB</td>'
+                '<td data-timestamp="1">date</td><td>2</td><td>1</td></tr>'
+            )
+            load("nyaasi", "qbittorrent/search/nyaasi.py").nyaasi().search("fixture")
+            result = results.pop()
+            self.assertEqual((result["name"], result["link"], result["seeds"]), ("Fixture", magnet, 2))
+
+            def snowfl_response(url):
+                if url == "https://snowfl.com/":
+                    return '<script src="b.min.js?fixture"></script>'
+                if "b.min.js" in url:
+                    return 'findNextItem "fixture-key"'
+                return json.dumps([{"name": "Fixture", "magnet": magnet, "size": "1 MiB", "seeder": 2, "leecher": 1}])
+
+            helpers.retrieve_url = snowfl_response
+            load("snowfl", "qbittorrent/search/snowfl.py").snowfl().search("fixture")
+            result = results.pop()
+            self.assertEqual((result["name"], result["link"], result["seeds"]), ("Fixture", magnet, 2))
+
+    def test_limetorrents_emits_only_magnets_with_valid_hashes(self):
+        results = []
+        helpers = types.SimpleNamespace(retrieve_url=lambda url: "")
+        printer = types.SimpleNamespace(prettyPrinter=results.append)
+        with patch.dict(sys.modules, {"helpers": helpers, "novaprinter": printer}):
+            plugin = load("limetorrents", "qbittorrent/search/limetorrents.py")
+            base = "https://itorrents.net/torrent/"
+            valid = base + "A" * 40 + ".torrent?title=Fixture"
+            for link in [valid, "", base + "a" * 39 + ".torrent", base + "a" * 41 + ".torrent",
+                         base + "g" * 40 + ".torrent", "https://untrusted.test/torrent/" + "a" * 40 + ".torrent"]:
+                with self.subTest(link=link):
+                    results.clear()
+                    before = time.time()
+                    parser = plugin.limetorrents.MyHtmlParser(plugin.limetorrents.url)
+                    parser.feed(
+                        '<table class="table2"><tr bgcolor="#F4F4F4"><td>'
+                        f'<a href="{link}"></a><a href="/Fixture-torrent-42.html">Fixture</a>'
+                        '</td><td>2 days</td><td>1 MB</td><td>2</td><td>1</td></tr></table>'
+                    )
+                    parser.close()
+                    if link != valid:
+                        self.assertEqual(results, [])
+                        continue
+                    self.assertEqual(len(results), 1)
+                    result = results[0]
+                    self.assertEqual(result["link"], "magnet:?xt=urn:btih:" + "a" * 40)
+                    self.assertEqual(result["desc_link"], plugin.limetorrents.url + "/Fixture-torrent-42.html")
+                    self.assertEqual((result["name"], result["seeds"], result["leech"]), ("Fixture", "2", "1"))
+                    self.assertLess(abs(int(result["pub_date"]) - (before - 2 * 86400)), 2)
 
     def test_ftp_tls_auth_and_errors(self):
         environment = {"INTERNAL_API_SECRET": "s" * 32, "AUTHD_ACCOUNT": "é space", "AUTHD_PASSWORD": "private", "AUTHD_ENCRYPTED": "1"}

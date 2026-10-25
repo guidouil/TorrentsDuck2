@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS "user" (
   role text NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
   enabled boolean NOT NULL DEFAULT true,
   approved boolean NOT NULL DEFAULT false,
+  "canManageSources" boolean NOT NULL DEFAULT false,
   "legacyId" text UNIQUE,
   "createdAt" timestamptz NOT NULL DEFAULT now(),
   "updatedAt" timestamptz NOT NULL DEFAULT now()
@@ -21,6 +22,7 @@ DO $$ BEGIN
     ALTER TABLE "user" ALTER COLUMN approved SET DEFAULT false;
   END IF;
 END $$;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "canManageSources" boolean NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX IF NOT EXISTS user_email_lower ON "user" (lower(email));
 
 CREATE TABLE IF NOT EXISTS session (
@@ -94,6 +96,17 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS torrent_authors (
   hash text PRIMARY KEY,
   user_id text REFERENCES "user"(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS search_sources (
+  id text PRIMARY KEY,
+  name text NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+  origin text NOT NULL,
+  config text NOT NULL,
+  format text NOT NULL CHECK (format IN ('json', 'rss', 'html')),
+  authenticated boolean NOT NULL DEFAULT false,
+  enabled boolean NOT NULL DEFAULT true,
+  created_by text REFERENCES "user"(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS bandwidth_peaks (

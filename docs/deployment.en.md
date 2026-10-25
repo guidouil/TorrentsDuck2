@@ -171,6 +171,7 @@ Before opening access to members:
 - In a private browser window, check that lists, downloads and playback are denied; `/_protected/...` and `/api/internal/ftp-auth` must return 404 from the Internet.
 - Test registration, the waiting page, first administrator verification, email delivery and member approval. After an import, check accounts, permissions, an accented username, email sign-in, password hash upgrade, password reset and revocation.
 - Add an authorized public test torrent; check progress, stop/resume, persistence after restart and both deletion modes. Test search, sorting, pagination, chat and SSE reconnection.
+- On Search, run a query, add a result to transfers and check failures from an unavailable source. Grant and revoke the Source manager permission on a member: source administration must work only while granted, without access to accounts or backups. Also check that the APIs reject ordinary, pending and disabled members.
 - In a signed-out browser, display the login QR code and scan it with a phone. Check that signing in on the phone returns to confirmation, compare the codes, explicitly approve, and verify that the first browser signs in automatically. Also test denial and expiry after five minutes; pending or disabled accounts must not be able to approve a device. Use the same HTTPS site address on both devices.
 - Sign in to the same account in several browsers, including the TV, then sign out from one: all its web access must be denied immediately and open screens must return to sign-in within a few seconds. Check that an approved but unused QR code cannot reconnect the TV and that another account stays signed in.
 - Test video seeking, a VLC link, its revocation and expiration, and a format unsupported by the browser. On Android, iPhone and iPad (including desktop mode), check the “Open in VLC” button in the link dialog with VLC installed; also check that copying the link remains available without VLC.
@@ -181,6 +182,91 @@ Before opening access to members:
 - Create an encrypted backup outside the host, restore it into an empty test database, and verify an account with a known password.
 
 These checks require actual verification of certificates, passive ports, storage, performance and restoration on the host or an equivalent machine. This documentation does not certify that they have passed.
+
+## Search and sources
+
+The Search page combines qBittorrent plugins with URL sources parsed by the web
+server, allowing one active search per member,
+four simultaneous searches for the site, a maximum duration of 90 seconds and
+five-minute result retention. Jobs belong to the account that created them;
+adding a result reuses the permissions, author attribution and disk reserve of
+manual torrent addition.
+Search ownership stays in memory in the single web process, so results are not
+restored after it restarts. Multiple web replicas would require shared job
+storage.
+
+Sorting by seeders, leechers, recent date, descending size or name and filtering
+by minimum seeders and minimum/maximum size happen before pagination, across at
+most the first 2,000 results returned by the engine. The page reports when this
+limit is reached; sorting does not cover results beyond that limit. Choose one
+source or all sources before starting the search. Size filters use GiB. A date
+missing from the engine response stays unknown; Snowfl and LimeTorrents dates, when available,
+are approximate because they are derived from the site's relative age values.
+
+The qBittorrent image contains five pinned plugins: The Pirate Bay (general
+index through APiBay), Torrents CSV (general index), Nyaa.si (anime and Asian
+content), LimeTorrents (general index), and Snowfl (aggregator). The first start of this version installs the
+first four without replacing existing files. Snowfl remains optional: its
+homepage returned HTTP 520 during validation on 25 October 2026. The other sources
+responded to a test query from the validation environment; availability from the
+deployment host still needs checking. No content was downloaded in these checks.
+
+The LimeTorrents plugin is adapted locally to produce magnets from the hashes
+already present in search-list links. It sends no HTML description page to
+torrent addition and omits rows without a valid hash. If sources have already
+been initialized on the volume, install LimeTorrents from Sources after rebuilding
+the image; the first-start marker preserves existing choices.
+
+An administrator can grant the additional **Source manager** permission
+(`canManageSources`) from the member list. An active, approved member with this
+permission can add URL sources, test them, install bundled catalogue versions,
+enable, disable and remove sources. Administrators always have access. This permission grants no account
+or backup administration. Revocation is checked on every API call.
+
+To add a URL source from **Search → Sources**:
+
+1. Enter a name and search URL, replacing keywords with `{query}`, for example
+   `https://example.org/search?q={query}`. A URL without the placeholder is
+   treated as a fixed list or feed, filtered by result name.
+2. Optionally choose HTTP Basic (username/password), Bearer, or an API key sent
+   in `X-Api-Key`. Authenticated requests require HTTPS.
+3. Choose **Analyze and add**. The check uses `ubuntu` and recognizes JSON,
+   RSS/Atom/Torznab, and HTML containing magnets, torrent links or recognized
+   hashes. **Test** checks an existing source again.
+
+URL sources execute no code supplied by their manager. Authenticated access is
+shared: all approved members can search them and add their results to shared
+transfers. Only managers and administrators modify sources. The browser receives
+only their public origin and opaque result references; complete URLs, query
+parameters and credentials stay on the server.
+
+There is a limit of ten URL sources, 2 MiB responses and a total timeout of
+30 seconds per request. Private addresses are rejected, and redirects cannot
+change origin or downgrade HTTPS to HTTP. Torrent files can reach 8 MiB;
+credentials are sent only to the configured origin, never another file host.
+
+On failure, use **Copy** on the v1 detection report and share it to request an
+adapter. It describes HTTP status, type, size and response structure, with no raw
+body, cookie, password, token or parameter value. Reports are not stored in the
+database, and their HTTP responses use `Cache-Control: no-store`.
+Site-specific login forms, JavaScript pages and captchas require an
+adapter; an unknown page is not added.
+
+The replayable `db/001-initial.sql` schema creates `search_sources` during the
+normal deployment migration. Full URL source configuration is encrypted with
+AES-256-GCM using a key derived from `BETTER_AUTH_SECRET`. Keep that secret;
+after rotating it, remove and re-add URL sources with their credentials.
+
+Catalogue plugins execute Python inside qBittorrent. The interface accepts
+declarative search URLs, but no URL of Python code to install. Files, versions,
+licences and checksums are recorded in
+[`deploy/qbittorrent/search/SOURCES.md`](../deploy/qbittorrent/search/SOURCES.md).
+A new plugin or plugin code update requires review, an image rebuild and installation
+from the catalogue; remove and reinstall an existing plugin to replace its code.
+Removed and disabled sources stay that way after a restart.
+The `compose.local.yaml` stack keeps qBittorrent on an internal network without
+Internet indexer access. URL sources use the `web` network connection; local tests
+still use simulated responses.
 
 ## Operations, certificates and backups
 

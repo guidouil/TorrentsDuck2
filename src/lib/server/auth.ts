@@ -34,7 +34,7 @@ export async function verifyAndUpgradePassword({ password, hash }: { password: s
 export async function findByIdentifier(identifier: string): Promise<(Member & { password: string }) | null> {
   if (!identifier || identifier.length > 320) return null;
   const found = await query<Member & { password: string }>(
-    `SELECT u.id,u.name,u.username,u.email,u."emailVerified",u.role,u.enabled,u.approved,a.password
+    `SELECT u.id,u.name,u.username,u.email,u."emailVerified",u.role,u.enabled,u.approved,u."canManageSources",a.password
      FROM "user" u JOIN account a ON a."userId"=u.id AND a."providerId"='credential'
      WHERE u.username=$1 OR lower(u.email)=lower($1) LIMIT 2`, [identifier]);
   return found.length === 1 ? found[0] : null;
@@ -79,6 +79,7 @@ export const auth = betterAuth({
       role: { type: 'string', defaultValue: 'member', input: false },
       enabled: { type: 'boolean', defaultValue: true, input: false },
       approved: { type: 'boolean', defaultValue: false, input: false },
+      canManageSources: { type: 'boolean', defaultValue: false, input: false },
       legacyId: { type: 'string', required: false, input: false, returned: false }
     }
   },
@@ -146,4 +147,4 @@ export const auth = betterAuth({
   }
 });
 
-export { requireMember, requireAdmin } from './permissions';
+export { requireMember, requireAdmin, requireSourceManager } from './permissions';

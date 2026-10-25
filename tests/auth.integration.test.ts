@@ -266,14 +266,30 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     expect(users.filter((user: { id: string }) => [adminId, memberId, ftpId].includes(user.id)).map((user: { id: string }) => user.id)).toEqual([memberId, ftpId, adminId]);
   });
 
+  it('delegates source management without account administration and revokes it on the same session', async () => {
+    expect((await authModule.requireMember(event('/api/torrents', undefined, cookie))).canManageSources).toBe(false);
+    const granted = await adminRoutes.POST(event('/api/admin/users', { id: memberId, canManageSources: true }, adminCookie));
+    expect((await granted.json()).user).toMatchObject({ role: 'member', canManageSources: true });
+    try {
+      expect((await authModule.requireSourceManager(event('/api/torrents', undefined, cookie))).id).toBe(memberId);
+      const session = await authModule.auth.api.getSession({ headers: new Headers({ cookie }), query: { disableCookieCache: true } });
+      expect(session?.user.canManageSources).toBe(true);
+      await expect(adminRoutes.POST(event('/api/admin/users', { id: memberId, role: 'admin' }, cookie))).rejects.toMatchObject({ status: 403 });
+    } finally {
+      await adminRoutes.POST(event('/api/admin/users', { id: memberId, canManageSources: false }, adminCookie));
+    }
+    await expect(authModule.requireSourceManager(event('/api/torrents', undefined, cookie))).rejects.toMatchObject({ status: 403 });
+    expect((await authModule.requireMember(event('/api/torrents', undefined, cookie))).id).toBe(memberId);
+  });
+
   it('allows registration and login while refusing all services before approval', async () => {
-    const body = { username: `${prefix}-public`, email: `${prefix}+public@example.org`, password, role: 'admin', approved: true, enabled: false };
+    const body = { username: `${prefix}-public`, email: `${prefix}+public@example.org`, password, role: 'admin', approved: true, enabled: false, canManageSources: true };
     const registered = await registration.POST(event('/api/registration', body));
     expect(registered.status).toBe(201);
     expect(mail.registration).toHaveBeenCalledWith(`${prefix}+admin@example.org`, body.username, body.email, `${origin}/admin`);
-    const { rows: [user] } = await db.query('SELECT id,role,enabled,approved,"emailVerified" FROM "user" WHERE username=$1', [body.username]);
+    const { rows: [user] } = await db.query('SELECT id,role,enabled,approved,"canManageSources","emailVerified" FROM "user" WHERE username=$1', [body.username]);
     pendingId = user.id;
-    expect(user).toMatchObject({ role: 'member', enabled: true, approved: false, emailVerified: false });
+    expect(user).toMatchObject({ role: 'member', enabled: true, approved: false, canManageSources: false, emailVerified: false });
     pendingCookie = await login(body.email);
     const session = await authModule.auth.api.getSession({ headers: new Headers({ cookie: pendingCookie }) });
     expect(session?.user.id).toBe(pendingId);

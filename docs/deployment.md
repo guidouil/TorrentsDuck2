@@ -173,6 +173,7 @@ Avant ouverture aux membres :
 - Sur un navigateur déconnecté, afficher le QR code de connexion et le scanner depuis un téléphone. Vérifier le retour à la confirmation après connexion du téléphone, la comparaison du code, l’autorisation explicite puis la connexion automatique du premier navigateur. Tester aussi le refus et l’expiration après cinq minutes ; un compte en attente ou désactivé ne doit pas pouvoir autoriser un appareil. Utiliser la même adresse HTTPS sur les deux appareils.
 - Connecter le même compte dans plusieurs navigateurs, dont la télé, puis se déconnecter depuis un seul : tous ses accès web doivent être refusés immédiatement et les écrans ouverts doivent revenir à la connexion en quelques secondes. Vérifier qu’un QR code déjà autorisé mais pas encore utilisé ne reconnecte pas la télé et qu’un autre compte reste connecté.
 - Ajouter un torrent public autorisé, vérifier progression, arrêt/reprise, persistance après redémarrage et les deux modes de suppression. Tester recherche, tri, pagination, chat et reconnexion SSE.
+- Dans Recherche, lancer une recherche, ajouter un résultat aux transferts et vérifier les erreurs d'une source indisponible. Attribuer puis retirer le droit « Gestionnaire des sources » à un membre : il doit pouvoir administrer les sources seulement pendant l'attribution, sans accéder aux comptes ni aux sauvegardes. Vérifier aussi le refus des API pour un membre ordinaire, en attente ou désactivé.
 - Tester la lecture vidéo avec déplacement, un lien VLC, sa révocation et son expiration, ainsi qu'un format non lu par le navigateur. Sur Android, iPhone et iPad (y compris en mode bureau), vérifier le bouton « Ouvrir dans VLC » dans la fenêtre du lien, avec VLC installé ; vérifier aussi que la copie du lien reste accessible sans VLC.
 - Dans FileZilla/Cyberduck, choisir **FTP avec TLS explicite obligatoire**, le nom du certificat et le port `21000`. Vérifier téléchargement, écriture dans `share` et refus d'écriture dans `downloads`. Refuser le FTP en clair et les canaux de données non chiffrés.
 - Désactiver un membre connecté : toutes les sessions FTPS doivent se fermer en quelques secondes et le compte révoqué doit échouer à se reconnecter. L'indisponibilité de l'API interne doit aussi fermer les sessions.
@@ -181,6 +182,103 @@ Avant ouverture aux membres :
 - Créer une sauvegarde chiffrée hors de l'hôte, la restaurer dans une base de test vide et vérifier un compte avec un mot de passe connu.
 
 Ces essais nécessitent une vérification réelle des certificats, ports passifs, stockage, performances et restauration sur l'hôte ou une machine équivalente. Cette documentation ne certifie pas leur réussite.
+
+## Recherche et sources
+
+La page Recherche combine les plugins qBittorrent et les sources URL analysées
+par le serveur web, avec une recherche active par
+membre, quatre recherches simultanées pour le site, une durée maximale de
+90 secondes et des résultats conservés cinq minutes. Les tâches sont rattachées
+au compte qui les a créées ; l'ajout d'un résultat réutilise les autorisations,
+l'attribution d'auteur et la réserve disque de l'ajout manuel.
+Le suivi des recherches reste en mémoire dans l'unique processus web : les
+résultats ne sont pas restaurés après son redémarrage. Plusieurs réplicas web
+nécessiteraient un stockage partagé de ce suivi.
+
+Les tris par seeders, leechers, date récente, taille décroissante ou nom et les
+filtres de seeders minimum et de taille minimum/maximum s'appliquent avant la
+pagination, sur les 2 000 premiers résultats au maximum renvoyés par le moteur.
+La page signale si cette limite est atteinte ; un tri ne porte donc pas sur les
+résultats au-delà de cette limite. Choisir une source ou toutes les sources avant
+de lancer la recherche. Les tailles des filtres sont exprimées en Gio. Une date
+absente de la réponse du moteur reste indiquée comme inconnue ; les dates
+Snowfl et LimeTorrents, lorsqu'elles sont disponibles, sont approximatives car calculées à
+partir d'un âge relatif fourni par le site.
+
+L'image qBittorrent contient un catalogue figé de cinq plugins : The Pirate Bay
+(généraliste via APiBay), Torrents CSV (généraliste), Nyaa.si (anime et contenus
+asiatiques), LimeTorrents (généraliste) et Snowfl (agrégateur). Le premier démarrage de cette version installe
+les quatre premiers sans remplacer de fichier existant. Snowfl reste facultatif :
+sa page a répondu HTTP 520 pendant la vérification du 25 octobre 2026. Les autres
+sources ont répondu à une recherche de test depuis l'environnement de validation ;
+leur disponibilité depuis le serveur reste à vérifier. Aucun contenu n'a été
+téléchargé pendant ces contrôles.
+
+Le plugin LimeTorrents est adapté localement pour produire des magnets à partir
+des hashes déjà présents dans les liens de la liste. Il n'envoie pas une fiche
+HTML à l'ajout de torrent et ignore les lignes sans hash valide. Si les sources
+ont déjà été initialisées sur le volume, installer LimeTorrents depuis Sources
+après reconstruction de l'image ; le marqueur de premier démarrage préserve les
+choix existants.
+
+Un administrateur peut attribuer le droit supplémentaire **Gestionnaire des
+sources** (`canManageSources`) depuis la liste des membres. Un membre actif et
+approuvé disposant de ce droit peut ajouter des URL, tester ces sources,
+installer les versions du catalogue, activer, désactiver et retirer des sources.
+Les administrateurs ont toujours cet
+accès. Ce droit ne permet pas d'administrer les comptes ou les sauvegardes.
+La révocation est contrôlée à chaque appel API.
+
+Pour ajouter une source URL depuis **Recherche → Sources** :
+
+1. Saisir un nom et l'URL de recherche, en remplaçant les mots-clés par `{query}`,
+   par exemple `https://example.org/search?q={query}`. Une URL sans marqueur
+   est traitée comme une liste ou un flux fixe, filtré par le nom des résultats.
+2. Choisir éventuellement HTTP Basic (identifiant/mot de passe), Bearer ou une
+   clé API envoyée dans `X-Api-Key`. Les accès authentifiés exigent HTTPS.
+3. Choisir **Analyser et ajouter**. La vérification utilise `ubuntu` et reconnaît
+   JSON, RSS/Atom/Torznab et les pages HTML contenant des magnets, liens torrent
+   ou hashes reconnus. **Tester** revérifie ensuite une source enregistrée.
+
+Les sources URL n'exécutent aucun code fourni par leur gestionnaire. Leurs accès
+authentifiés sont partagés : tous les membres approuvés peuvent rechercher et
+ajouter leurs résultats aux transferts collectifs. Seuls les gestionnaires et
+administrateurs modifient les sources. Le navigateur reçoit uniquement leur
+origine publique et des références opaques pour les résultats ; URL complètes,
+paramètres et identifiants restent côté serveur.
+
+La limite est de dix sources URL, avec des réponses de 2 Mio et un délai total
+de 30 secondes par requête. Les adresses privées sont refusées et les
+redirections ne peuvent changer d'origine ni rétrograder de HTTPS vers HTTP.
+Les fichiers `.torrent` peuvent atteindre 8 Mio ; les identifiants sont transmis
+uniquement à l'origine configurée, jamais à un autre hébergeur de fichier.
+
+En cas d'échec, utiliser **Copier** dans le rapport de détection v1 puis le
+transmettre pour faire ajouter un adaptateur. Il décrit le statut HTTP, le type,
+la taille et la structure de la réponse, sans corps brut, cookie, mot de passe,
+jeton ou valeur de paramètre. Ces rapports ne sont pas enregistrés en base et
+leurs réponses HTTP portent `Cache-Control: no-store`.
+Les formulaires de connexion spécifiques, pages nécessitant JavaScript et
+captchas nécessitent un adaptateur ; une page inconnue n'est pas ajoutée.
+
+Le schéma rejouable `db/001-initial.sql` crée la table `search_sources` lors de
+la migration habituelle du déploiement. La configuration complète des sources
+URL est chiffrée en AES-256-GCM avec une clé dérivée de `BETTER_AUTH_SECRET`.
+Conserver ce secret ; après sa rotation, retirer puis ajouter à nouveau les
+sources URL avec leurs identifiants.
+
+Les plugins du catalogue exécutent du Python dans le conteneur qBittorrent :
+l'interface accepte les URL de recherche déclaratives, mais aucune URL de code
+Python à installer. Les fichiers, versions, licences et
+empreintes sont conservés dans
+[`deploy/qbittorrent/search/SOURCES.md`](../deploy/qbittorrent/search/SOURCES.md).
+Un nouveau plugin ou une mise à jour de son code nécessite une revue, une
+reconstruction de l'image puis une installation depuis le catalogue ; pour un
+plugin déjà installé, le retirer puis le réinstaller. Les sources
+retirées ou désactivées restent dans cet état après redémarrage. La pile
+`compose.local.yaml` garde qBittorrent sur un réseau interne sans accès aux
+indexeurs Internet. Les sources URL utilisent la sortie réseau de `web` ; les
+tests locaux restent fondés sur des réponses simulées.
 
 ## Exploitation, certificats et sauvegardes
 

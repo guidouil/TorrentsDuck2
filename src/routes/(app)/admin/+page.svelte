@@ -6,13 +6,13 @@
   import Modal from '#lib/Modal.svelte';
   let { data } = $props();
   let users = $state<any[]>([]); let backup = $state<any>(null); let error = $state(''); let busy = $state(false); let loading = $state(true); let query = $state('');
-  type UserChange = { user: any; approved?: boolean; enabled?: boolean; role?: string; delete?: boolean };
+  type UserChange = { user: any; approved?: boolean; enabled?: boolean; role?: string; canManageSources?: boolean; delete?: boolean };
   let changeOpen = $state(false); let change = $state<UserChange | null>(null);
   const filtered = $derived(users.filter((u) => `${u.username} ${u.email}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())));
   async function load() { try { const [members, backups] = await Promise.all([api('/api/admin/users'), api('/api/admin/backup')]); users = members.users; backup = backups.backup; } catch (e) { error = (e as Error).message; } finally { loading = false; } }
   onMount(() => { void load(); });
   function ask(user: any, update: Omit<UserChange, 'user'>) { error = ''; change = { user, ...update }; changeOpen = true; }
-  async function updateUser(update = change) { if (!update) return; busy = true; error = ''; try { if (update.delete) { await api(`/api/admin/users/${encodeURIComponent(update.user.id)}`, { method: 'DELETE', body: JSON.stringify({ confirm: true }) }); } else { await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ id: update.user.id, ...(update.approved !== undefined ? { approved: update.approved } : {}), ...(update.enabled !== undefined ? { enabled: update.enabled } : {}), ...(update.role ? { role: update.role } : {}) }) }); } changeOpen = false; await load(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
+  async function updateUser(update = change) { if (!update) return; busy = true; error = ''; try { if (update.delete) { await api(`/api/admin/users/${encodeURIComponent(update.user.id)}`, { method: 'DELETE', body: JSON.stringify({ confirm: true }) }); } else { await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ id: update.user.id, ...(update.approved !== undefined ? { approved: update.approved } : {}), ...(update.enabled !== undefined ? { enabled: update.enabled } : {}), ...(update.role ? { role: update.role } : {}), ...(update.canManageSources !== undefined ? { canManageSources: update.canManageSources } : {}) }) }); } changeOpen = false; await load(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
 </script>
 <svelte:head><title>{$t.admin} · Torrents Duck</title></svelte:head>
 <h1 class="sr-only">{$t.admin}</h1>
@@ -51,7 +51,7 @@
               <td class="member-name" role="cell"><strong>{user.username}</strong></td>
               <td class="member-email muted" role="cell">{user.email}</td>
               <td class="member-since muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.since}</span>{new Date(user.createdAt).toLocaleDateString($language)}</td>
-              <td class="member-role" role="cell"><span class="mobile-label" aria-hidden="true">{$t.role}</span>{user.role === 'admin' ? $t.administrator : $t.member}</td>
+              <td class="member-role" role="cell"><span class="mobile-label" aria-hidden="true">{$t.role}</span><div>{user.role === 'admin' ? $t.administrator : $t.member}{#if user.role !== 'admin' && user.canManageSources}<small class="muted">{$t.sourceManager}</small>{/if}</div></td>
               <td class="member-state" role="cell"><span class={['badge', { good: user.enabled && user.approved }]}>{!user.enabled ? $t.disabled : !user.approved ? $t.pending : $t.enabled}</span></td>
               <td class="member-actions" role="cell">
                 {#if user.id !== data.user?.id}
@@ -59,6 +59,7 @@
                     {#if !user.approved}<button class="quiet-button" disabled={busy} onclick={() => updateUser({ user, approved: true })}>{$t.approve}</button>{/if}
                     <button class="quiet-button" disabled={busy} onclick={() => ask(user, { enabled: !user.enabled })}>{user.enabled ? $t.disable : $t.allow}</button>
                     <button class="quiet-button" disabled={busy} onclick={() => ask(user, { role: user.role === 'admin' ? 'member' : 'admin' })}>{user.role === 'admin' ? $t.makeMember : $t.makeAdmin}</button>
+                    {#if user.role !== 'admin'}<button class="quiet-button" disabled={busy} onclick={() => ask(user, { canManageSources: !user.canManageSources })}>{user.canManageSources ? $t.revokeSourceManagement : $t.grantSourceManagement}</button>{/if}
                     <button class="quiet-button danger" disabled={busy} onclick={() => ask(user, { delete: true })}>{$t.deleteAccount}</button>
                   </div>
                 {:else}<span class="muted">{$t.you}</span>{/if}
@@ -70,7 +71,7 @@
     </div>
   {/if}
 </section>
-<Modal bind:open={changeOpen} title={change?.delete ? $t.deleteAccount : $t.changePermissions}>{#if change}<p>{change.delete ? $t.confirmDeleteAccount : $t.confirmPermissions} <strong>{change.user.username}</strong> ?</p>{#if change.delete}<p>{$t.deleteAccountHelp}</p>{:else if change.enabled === false}<p>{$t.revokeWeb}</p>{/if}{#if change.delete || change.enabled === false}<p>{$t.ftpsDisconnect}</p>{/if}<div class="dialog-actions"><button class="secondary" onclick={() => { changeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: change.delete || change.enabled === false }]} disabled={busy} onclick={() => updateUser()}>{change.delete ? $t.deletePermanently : $t.confirm}</button></div>{/if}</Modal>
+<Modal bind:open={changeOpen} title={change?.delete ? $t.deleteAccount : $t.changePermissions}>{#if change}<p>{change.delete ? $t.confirmDeleteAccount : $t.confirmPermissions} <strong>{change.user.username}</strong> ?</p>{#if change.delete}<p>{$t.deleteAccountHelp}</p>{:else if change.enabled === false}<p>{$t.revokeWeb}</p>{/if}{#if change.canManageSources !== undefined}<p>{$t.sourceManagementHelp}</p>{/if}{#if change.delete || change.enabled === false}<p>{$t.ftpsDisconnect}</p>{/if}<div class="dialog-actions"><button class="secondary" onclick={() => { changeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: change.delete || change.enabled === false }]} disabled={busy} onclick={() => updateUser()}>{change.delete ? $t.deletePermanently : $t.confirm}</button></div>{/if}</Modal>
 
 <style>
   .backup-card{margin-bottom:16px}

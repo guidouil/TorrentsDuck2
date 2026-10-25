@@ -5,10 +5,10 @@ const mocks = vi.hoisted(() => ({ getSession: vi.fn(), query: vi.fn() }));
 vi.mock('../src/lib/server/auth', () => ({ auth: { api: { getSession: mocks.getSession } } }));
 vi.mock('../src/lib/server/db', () => ({ query: mocks.query }));
 
-import { requireAdmin, requireInternal, requireMember } from '../src/lib/server/permissions';
+import { requireAdmin, requireInternal, requireMember, requireSourceManager } from '../src/lib/server/permissions';
 
 const event = { request: new Request('http://localhost/api/files') } as RequestEvent;
-const user = { id: 'member', name: 'Éric+', username: 'Éric+', email: 'eric@example.org', role: 'member', enabled: true, approved: true, emailVerified: false };
+const user = { id: 'member', name: 'Éric+', username: 'Éric+', email: 'eric@example.org', role: 'member', enabled: true, approved: true, canManageSources: false, emailVerified: false };
 
 describe('private community access', () => {
   beforeEach(() => {
@@ -41,6 +41,25 @@ describe('private community access', () => {
     mocks.query.mockResolvedValue([{ ...user, role: 'admin', approved: false }]);
     await expect(requireMember(event)).rejects.toMatchObject({ status: 403 });
     await expect(requireAdmin(event)).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('grants source management to administrators or explicitly authorized members only', async () => {
+    await expect(requireSourceManager(event)).rejects.toMatchObject({ status: 403 });
+    mocks.query.mockResolvedValue([{ ...user, canManageSources: true }]);
+    expect((await requireSourceManager(event)).id).toBe(user.id);
+    await expect(requireAdmin(event)).rejects.toMatchObject({ status: 403 });
+    mocks.query.mockResolvedValue([{ ...user, role: 'admin' }]);
+    expect((await requireSourceManager(event)).role).toBe('admin');
+  });
+
+  it('checks source management revocation live instead of trusting session claims', async () => {
+    mocks.getSession.mockResolvedValue({ user: { id: user.id, canManageSources: true } });
+    await expect(requireSourceManager(event)).rejects.toMatchObject({ status: 403 });
+  });
+
+  it.each([{ enabled: false }, { approved: false }])('refuses source managers with revoked community access %j', async (flags) => {
+    mocks.query.mockResolvedValue([{ ...user, canManageSources: true, ...flags }]);
+    await expect(requireSourceManager(event)).rejects.toMatchObject({ status: 403 });
   });
 
   it('fails closed for missing, wrong or malformed internal secrets', () => {

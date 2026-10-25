@@ -1,0 +1,52 @@
+[
+  {
+    "id": "piratebay",
+    "name": "The Pirate Bay",
+    "url": "https://thepiratebay.org",
+    "description": {
+      "fr": "Index généraliste, recherche via l’API publique APiBay.",
+      "en": "General index, searched through the public APiBay API."
+    },
+    "initial": true
+  },
+  {
+    "id": "torrentscsv",
+    "name": "Torrents CSV",
+    "url": "https://torrents-csv.com",
+    "description": {
+      "fr": "Index généraliste communautaire avec liens magnet.",
+      "en": "Community maintained general index with magnet links."
+    },
+    "initial": true
+  },
+  {
+    "id": "nyaasi",
+    "name": "Nyaa.si",
+    "url": "https://nyaa.si",
+    "description": {
+      "fr": "Anime, mangas, musique et autres contenus asiatiques.",
+      "en": "Anime, manga, music and other Asian content."
+    },
+    "initial": true
+  },
+  {
+    "id": "limetorrents",
+    "name": "LimeTorrents",
+    "url": "https://www.limetorrents.lol",
+    "description": {
+      "fr": "Index généraliste ; liens magnet extraits des résultats.",
+      "en": "General index; magnet links extracted from search results."
+    },
+    "initial": true
+  },
+  {
+    "id": "snowfl",
+    "name": "Snowfl",
+    "url": "https://snowfl.com",
+    "description": {
+      "fr": "Agrégateur généraliste. Installation facultative ; disponibilité variable.",
+      "en": "General aggregator. Optional installation; availability varies."
+    },
+    "initial": false
+  }
+]

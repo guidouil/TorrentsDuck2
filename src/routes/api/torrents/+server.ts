@@ -5,6 +5,9 @@ import { addTorrent } from '#lib/server/qbittorrent.js';
 import { torrentSnapshot, invalidateSnapshot } from '#lib/server/torrent-stream.js';
 import { rateLimit } from '#lib/server/rate-limit.js';
 import { audit } from '#lib/server/audit.js';
+import { resolveSearchResult } from '#lib/server/torrent-search.js';
+import { SourceError } from '#lib/server/url-sources.js';
+import { requireStorage } from '#lib/server/storage.js';
 
 export const GET: RequestHandler = async (event) => {
 	await requireMember(event);
@@ -35,7 +38,17 @@ export const POST: RequestHandler = async (event) => {
 		if (typeof value !== 'string' && !(value instanceof File)) error(400, 'Source requise.');
 		source = typeof value === 'string' ? value.trim() : value;
 	}
-	const result = await addTorrent(source, user.id);
+	let result;
+	try {
+		if (typeof source === 'string' && source.startsWith('search:')) {
+			await requireStorage();
+			source = await resolveSearchResult(source, user.id);
+		}
+		result = await addTorrent(source, user.id);
+	} catch (cause) {
+		if (cause instanceof SourceError) return json({ message: cause.message, diagnostic: cause.diagnostic }, { status: cause.status, headers: { 'Cache-Control': 'no-store' } });
+		throw cause;
+	}
 	invalidateSnapshot();
 	await audit(user.id, 'torrent.add');
 	return json(result, { status: 201 });

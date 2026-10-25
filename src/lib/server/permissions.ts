@@ -12,9 +12,10 @@ export type Member = {
   role: 'admin' | 'member';
   enabled: boolean;
   approved: boolean;
+  canManageSources: boolean;
 };
 
-export const memberFields = 'id, name, username, email, "emailVerified", role, enabled, approved';
+export const memberFields = 'id, name, username, email, "emailVerified", role, enabled, approved, "canManageSources"';
 
 export { readJson as readJsonObject } from './network';
 
@@ -30,6 +31,12 @@ export async function requireMember(event: RequestEvent): Promise<Member> {
 export async function requireAdmin(event: RequestEvent): Promise<Member> {
   const user = await requireMember(event);
   if (user.role !== 'admin') error(403, 'Administrator access required');
+  return user;
+}
+
+export async function requireSourceManager(event: RequestEvent): Promise<Member> {
+  const user = await requireMember(event);
+  if (user.role !== 'admin' && !user.canManageSources) error(403, 'Source management permission required');
   return user;
 }
 
