@@ -13,7 +13,7 @@
   const canDelete = $derived(space === 'share' || data.user?.role === 'admin');
   const path = $derived(location.searchParams.get('path') ?? '');
   const query = $derived(location.searchParams.get('search') ?? '');
-  const sort = $derived(location.searchParams.get('sort') ?? 'modifiedAt');
+  const sort = $derived(location.searchParams.get('sort') ?? (path ? 'name' : 'modifiedAt'));
   const requestedOffset = $derived(Number(location.searchParams.get('offset')));
   const offset = $derived(Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0);
   const parts = $derived(path.split('/').filter(Boolean));
@@ -37,7 +37,7 @@
     if (url.href !== location.href) void goto(url, { shallow: true, replace, reset: false });
   }
   function switchSpace(value: string) { browse({ space: value, path: '', offset: '', search: '' }); }
-  function enter(value: string) { browse({ path: value, offset: '', search: '' }); }
+  function enter(value: string) { browse({ path: value, offset: '', search: '', sort: '' }); }
   function ask(action: string, entry: Entry | null = null) { operation = action; selected = entry; newName = action === 'rename' && entry ? entry.name : ''; dialogOpen = true; }
   async function mutate(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; try { await api('/api/files', { method: 'POST', body: JSON.stringify({ action: operation, space, path: selected?.path ?? path, name: newName, confirm: operation === 'delete' }) }); dialogOpen = false; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   async function upload(event: Event) { const input = event.currentTarget as HTMLInputElement; if (!input.files?.length) return; const uploadPath = path; busy = true; error = ''; notice = ''; try { for (const file of Array.from(input.files)) { notice = `${$t.uploading} ${file.name}…`; const body = new FormData(); body.set('file', file); body.set('action', 'upload'); await api(`/api/files?${new URLSearchParams({ space: 'share', path: uploadPath })}`, { method: 'POST', body }); } notice = $t.uploaded; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; input.value = ''; } }

@@ -105,11 +105,16 @@ describe('file type icons', () => {
 });
 
 describe('file explorer URL navigation', () => {
-  it('defaults to sorting by date when no sort is selected', async () => {
-    const files = explorer(origin);
-    expect(files.state().sort).toBe('modifiedAt');
+  it.each([
+    [origin, 'modifiedAt'],
+    [`${origin}?space=share`, 'modifiedAt'],
+    [`${origin}?path=Films`, 'name'],
+    [`${origin}?space=share&path=Films%2FÉté`, 'name']
+  ])('uses the default sort for %s when no sort is selected', async (url, sort) => {
+    const files = explorer(url);
+    expect(files.state().sort).toBe(sort);
     await files.loadFiles();
-    expect(new URL(files.api.mock.calls[0][0], origin).searchParams.get('sort')).toBe('modifiedAt');
+    expect(new URL(files.api.mock.calls[0][0], origin).searchParams.get('sort')).toBe(sort);
   });
 
   it.each([undefined, shared])('loads a bookmarked or shallow URL with all its explorer state (%s)', async (shallowUrl) => {
@@ -120,16 +125,20 @@ describe('file explorer URL navigation', () => {
     expect(Object.fromEntries(request.searchParams)).toEqual({ space: 'share', path: 'Films/Été 2026', search: 'version longue', sort: 'size', offset: '50', limit: '50' });
   });
 
-  it('keeps the space and sort when opening a folder, resets search and pagination, and restores them on back', () => {
+  it.each([
+    ['Films/Été 2026/A & B #1', 'name'],
+    ['Films', 'name'],
+    ['', 'modifiedAt']
+  ])('resets sort, search and pagination when entering %s and restores them on back', (path, sort) => {
     const files = explorer(shared);
-    files.enter('Films/Été 2026/A & B #1');
+    files.enter(path);
     const [target, options] = files.goto.mock.calls[0];
     expect(target.pathname).toBe('/files');
-    expect(Object.fromEntries(target.searchParams)).toEqual({ space: 'share', path: 'Films/Été 2026/A & B #1', sort: 'size' });
+    expect(Object.fromEntries(target.searchParams)).toEqual({ space: 'share', ...(path ? { path } : {}) });
     expect(options).toEqual({ shallow: true, replace: false, reset: false });
-    expect(explorer(origin, target.href).state()).toMatchObject({ path: 'Films/Été 2026/A & B #1', query: '', offset: 0 });
-    expect(explorer(origin, shared).state()).toMatchObject({ path: 'Films/Été 2026', query: 'version longue', offset: 50 });
-    expect(explorer(target.href).state()).toMatchObject({ path: 'Films/Été 2026/A & B #1', query: '', offset: 0 });
+    expect(explorer(origin, target.href).state()).toMatchObject({ path, sort, query: '', offset: 0 });
+    expect(explorer(origin, shared).state()).toMatchObject({ path: 'Films/Été 2026', sort: 'size', query: 'version longue', offset: 50 });
+    expect(explorer(target.href).state()).toMatchObject({ path, sort, query: '', offset: 0 });
   });
 
   it('switches spaces at the root and preserves the chosen sort', () => {
