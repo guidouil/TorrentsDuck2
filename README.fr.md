@@ -25,10 +25,12 @@ L'ensemble du projet a été orchestré avec **OpenAI Sol 6.1 Ultra**.
 
 | Espace | Rôle | Accès des membres |
 | --- | --- | --- |
-| `downloads` | Fichiers gérés par qBittorrent | Lecture via le site et FTPS |
+| `downloads` | Fichiers gérés par qBittorrent | Lecture via le site et FTPS ; suppression de fichiers et dossiers par les administrateurs |
 | `share` | Fichiers déposés par la communauté | Lecture et modification via le site et FTPS |
 
 Les deux espaces sont collectifs. Retirer un torrent conserve ses fichiers ; supprimer ses données exige une confirmation explicite et affecte toute la communauté.
+
+Les administrateurs actifs et approuvés peuvent aussi supprimer directement des fichiers et dossiers de `downloads` via le site et FTPS. La suppression est définitive pour tous ; le site demande une confirmation. Upload, renommage et création de dossiers y restent interdits. Les fichiers encore gérés par qBittorrent peuvent être signalés manquants ou téléchargés de nouveau.
 
 ## Docker local
 
@@ -132,7 +134,7 @@ docker compose --env-file .env.example config --no-env-resolution -q
 
 Suivre le guide Ubuntu 24.04 LTS et Docker en [français](docs/deployment.md) ou en [anglais](docs/deployment.en.md), puis [le guide de sauvegarde et migration depuis Meteor](docs/migration-backups.md) si nécessaire. L'installation couvre les ports, les secrets, PostgreSQL, les certificats HTTPS/FTPS, le premier administrateur, les sauvegardes et les mises à jour. Aucun script ne reformate un disque et aucun identifiant SSH n'est embarqué. Les services PostgreSQL et RPC qBittorrent ne publient aucun port. Les téléchargements HTTP passent par une autorisation de session, puis Nginx sert les fichiers.
 
-Les deux espaces sont collectifs : `downloads` est géré par qBittorrent et accessible en lecture via le site et FTPS ; `share` est modifiable via le site et FTPS. Le FTPS explicite utilise le port 21000 et exige TLS pour les commandes et les données.
+Les deux espaces sont collectifs : `downloads` est géré par qBittorrent, accessible en lecture aux membres et en suppression aux administrateurs via le site et FTPS ; `share` est modifiable via le site et FTPS. Le FTPS explicite utilise le port 21000 et exige TLS pour les commandes et les données.
 
 Une sauvegarde FTP chiffrée facultative peut partir directement du serveur chaque nuit, sans Mac allumé : PostgreSQL et configuration complets, puis les fichiers de `share` qui tiennent dans le quota, en commençant par les plus petits. Elle est désactivée par défaut ; le [guide de sauvegarde](docs/migration-backups.md#sauvegarde-ftp-automatique-depuis-le-serveur) décrit les clés `age`, le quota de 100 Go, la rétention et la restauration. Les téléchargements et l'état qBittorrent restent exclus.
 

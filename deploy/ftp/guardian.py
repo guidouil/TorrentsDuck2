@@ -56,21 +56,7 @@ def main():
     try:
         # No listening socket is opened before policy authentication succeeds.
         baseline = revision(os.environ)
-        children.append(subprocess.Popen(["/usr/sbin/pure-authd", "-s", "/run/pure-ftpd/auth.sock", "-r", "/usr/local/bin/ftp-auth"], start_new_session=True))
-        for _ in range(50):
-            if os.path.exists("/run/pure-ftpd/auth.sock"):
-                break
-            if children[0].poll() is not None:
-                raise RuntimeError("Authentication daemon stopped")
-            time.sleep(0.1)
-        else:
-            raise RuntimeError("Authentication socket unavailable")
-        children.append(subprocess.Popen([
-            "/usr/sbin/pure-ftpd", "-4", "-A", "-E", "-H", "-R", "-x", "-X", "-0",
-            "-c", "40", "-C", "8", "-u", "10000", "-U", "022:022", "-k", "90",
-            "-S", "0.0.0.0,21000", "-p", "50000:50100", "-P", os.environ["PUBLIC_IPV4"],
-            "-Y", "3", "-2", "/etc/ssl/private/pure-ftpd.pem", "-l", "extauth:/run/pure-ftpd/auth.sock",
-        ], start_new_session=True))
+        children.append(subprocess.Popen([sys.executable, "/usr/local/bin/server.py"], start_new_session=True))
         while True:
             time.sleep(5)
             if any(process.poll() is not None for process in children):

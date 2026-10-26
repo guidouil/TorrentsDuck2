@@ -24,7 +24,7 @@ PASSWORD = "integration-only-RPC-password-1234"
 MOCK = r'''
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-state={"revision":"1","revoked":False,"available":True}
+state={"revision":"1","revoked":False,"available":True,"admin":True}
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def answer(self,status,body=b"",headers={}):
@@ -45,9 +45,10 @@ class Handler(BaseHTTPRequestHandler):
         data=json.loads(self.rfile.read(int(self.headers.get("Content-Length","0"))) or b"{}")
         if self.headers.get("Authorization") != "Bearer integration-only-not-a-production-secret-1234": return self.answer(401)
         if self.path == "/api/internal/ftp-auth":
-            allowed=(data.get("username") in ["member","other","membre été"] and data.get("password")=="test password" and not (data.get("username")=="member" and state["revoked"]))
-            return self.answer(200 if allowed else 401,json.dumps({"authorized":allowed}).encode(),{"content-type":"application/json"})
-        if self.path == "/revoke": state.update(revision="2",revoked=True)
+            allowed=(data.get("username") in ["member","other","membre été","admin"] and data.get("password")=="test password" and not (data.get("username")=="member" and state["revoked"]))
+            return self.answer(200 if allowed else 401,json.dumps({"authorized":allowed,"role":"admin" if data.get("username")=="admin" and state["admin"] else "member"}).encode(),{"content-type":"application/json"})
+        if self.path == "/demote": state.update(revision="2",admin=False)
+        elif self.path == "/revoke": state.update(revision="3",revoked=True)
         elif self.path == "/available": state["available"]=data["available"]
         else: return self.answer(404)
         self.answer(200,b"ok")
@@ -112,6 +113,10 @@ def main():
             contents = b"0123456789" * 200
             (work / "share/sample.txt").write_bytes(contents)
             (work / "downloads/legal-fixture.txt").write_bytes(contents)
+            (work / "downloads/delete.txt").write_bytes(contents)
+            (work / "downloads/empty").mkdir()
+            (work / "downloads/link").symlink_to("legal-fixture.txt")
+            (work / "share/download-link").symlink_to("../downloads", target_is_directory=True)
             (work / "mock.py").write_text(MOCK)
             (work / "qbt/qBittorrent").mkdir()
             (work / "qbt/qBittorrent").chmod(0o777)
@@ -198,8 +203,8 @@ def main():
             assert headers["Content-Range"] == f"bytes 11-30/{len(contents)}"
             print("PASS Nginx: anonymous/internal denial, authenticated X-Accel redirect, byte-range video response", flush=True)
 
-            ftp_caps = [argument for capability in ["SETUID", "SETGID", "CHOWN", "NET_BIND_SERVICE", "SYS_CHROOT", "SYS_NICE", "DAC_READ_SEARCH", "AUDIT_WRITE", "KILL"] for argument in ["--cap-add", capability]]
-            ftp = start("ftp", "torrentduck-ftp", ["-p", "127.0.0.1::21000", "-p", "127.0.0.1:50000-50100:50000-50100", "-e", "INTERNAL_API_SECRET=" + SECRET, "-e", "PUBLIC_IPV4=127.0.0.1", "-v", f"{work / 'ftp-tls'}:/etc/ssl/private:ro", "-v", f"{work / 'share'}:/data/share", "-v", f"{work / 'downloads'}:/data/downloads:ro", "--read-only", "--tmpfs", "/run", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", *ftp_caps], "172.30.20.5")
+            ftp_caps = [argument for capability in ["SETUID", "SETGID", "SYS_CHROOT", "KILL"] for argument in ["--cap-add", capability]]
+            ftp = start("ftp", "torrentduck-ftp", ["-p", "127.0.0.1::21000", "-p", "127.0.0.1:50000-50100:50000-50100", "-e", "INTERNAL_API_SECRET=" + SECRET, "-e", "PUBLIC_IPV4=127.0.0.1", "-v", f"{work / 'ftp-tls'}:/etc/ssl/private:ro", "-v", f"{work / 'share'}:/data/share", "-v", f"{work / 'downloads'}:/data/downloads", "--read-only", "--tmpfs", "/run", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", *ftp_caps], "172.30.20.5")
             ftp_port = port(ftp, 21000)
 
             def ftp_client(username="member", protect=True):
@@ -212,6 +217,7 @@ def main():
 
             member = eventually(lambda: ftp_client())
             other = ftp_client("other")
+            admin = ftp_client("admin")
             accented = ftp_client("membre été")
             accented.quit()
             plain = ftplib.FTP(timeout=3)
@@ -239,13 +245,82 @@ def main():
                 raise AssertionError("Downloads accepted a write")
             except ftplib.error_perm:
                 pass
+            def denied(action):
+                try:
+                    action()
+                except ftplib.error_perm:
+                    return
+                raise AssertionError("Forbidden FTPS operation succeeded")
+
+            tls_probe = ftp_client("other")
+            tls_probe.sendcmd("PASV")
+            denied(lambda: tls_probe.sendcmd("PROT C"))
+            tls_probe.quit()
+            for client in (member, admin):
+                denied(lambda: client.storbinary("STOR /downloads/forbidden.txt", io.BytesIO(b"forbidden")))
+                denied(lambda: client.storbinary("APPE /downloads/legal-fixture.txt", io.BytesIO(b"forbidden")))
+                denied(lambda: client.mkd("/downloads/forbidden"))
+                denied(lambda: client.rename("/downloads/legal-fixture.txt", "/share/moved.txt"))
+                denied(lambda: client.rmd("/downloads"))
+                denied(lambda: client.rmd("/share"))
+                denied(lambda: client.rmd("/"))
+                denied(lambda: client.retrbinary("RETR /downloads/link", lambda _: None))
+                denied(lambda: client.storbinary("STOR /share/download-link/forbidden.txt", io.BytesIO(b"forbidden")))
+                denied(lambda: client.sendcmd("SITE CHMOD 777 /downloads/legal-fixture.txt"))
+                denied(lambda: client.sendcmd("STOU /downloads/unique.txt"))
+                denied(lambda: client.sendcmd("PROT C"))
+                denied(lambda: client.sendcmd("REIN"))
+                denied(lambda: client.sendcmd("USER admin"))
+            denied(lambda: member.delete("/downloads/delete.txt"))
+            denied(lambda: member.delete("/share/../downloads/delete.txt"))
+            denied(lambda: admin.retrbinary("RETR /../../etc/passwd", lambda _: None))
+            denied(lambda: member.rmd("/downloads/empty"))
+            admin.delete("/downloads/delete.txt")
+            admin.rmd("/downloads/empty")
+            assert not (work / "downloads/delete.txt").exists() and not (work / "downloads/empty").exists()
+            denied(lambda: admin.storbinary("STOR /share/upload.txt", io.BytesIO(b"resume"), rest=1))
             member.storbinary("STOR /share/upload.txt", io.BytesIO(b"shared fixture"))
+            denied(lambda: member.storbinary("STOR /share/upload.txt", io.BytesIO(b"overwrite")))
+            denied(lambda: member.storbinary("APPE /share/upload.txt", io.BytesIO(b"overwrite")))
+            assert (work / "share/upload.txt").read_bytes() == b"shared fixture"
+            denied(lambda: member.rename("/share/upload.txt", "/downloads/moved.txt"))
+            denied(lambda: member.rename("/share/upload.txt", "/share/sample.txt"))
+            assert (work / "share/sample.txt").read_bytes() == contents
             member.rename("/share/upload.txt", "/share/renamed.txt")
             received = io.BytesIO()
             member.retrbinary("RETR /share/renamed.txt", received.write)
             assert received.getvalue() == b"shared fixture"
             member.delete("/share/renamed.txt")
-            print("PASS FTPS: TLS control/data mandatory, Unicode login, downloads read-only, share upload/rename/delete", flush=True)
+            print("PASS FTPS: mandatory TLS, Unicode login, admin-only downloads deletion, protected roots/symlinks, exclusive share uploads/rename/delete", flush=True)
+
+            extra = [ftp_client("other") for _ in range(5)]
+            try:
+                unexpected = ftp_client("other")
+                unexpected.close()
+                raise AssertionError("FTPS accepted a ninth session from one IP")
+            except ftplib.all_errors:
+                pass
+            for client in extra:
+                client.quit()
+            pending = member.transfercmd("STOR /share/pending.txt")
+            pending.sendall(b"unfinished upload")
+            eventually(lambda: list((work / "share").glob(".duck-upload-*")))
+            assert not (work / "share/pending.txt").exists()
+            update_policy("/demote", {})
+            eventually(lambda: docker("inspect", "-f", "{{.State.Running}}", ftp) == "false", timeout=15)
+            pending.close()
+            assert not list((work / "share").glob(".duck-upload-*")), "Revocation left an orphan upload"
+            assert not (work / "share/pending.txt").exists()
+            for client in (member, other, admin):
+                client.close()
+            docker("start", ftp)
+            ftp_port = port(ftp, 21000)
+            admin = eventually(lambda: ftp_client("admin"))
+            denied(lambda: admin.delete("/downloads/legal-fixture.txt"))
+            admin.quit()
+            member = ftp_client()
+            other = ftp_client("other")
+            print("PASS FTPS: eight-session IP limit and administrator demotion revokes deletion", flush=True)
 
             update_policy("/revoke", {})
 

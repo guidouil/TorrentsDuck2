@@ -25,7 +25,7 @@ Adapter le travail à la demande et à son autorisation existante ; charger ce s
 - Les adresses qBittorrent `172.30.20.2` et `172.30.40.2` et leurs sous-réseaux sont couplés à `deploy/firewall.sh`, aux fixtures et aux guides. Modifier ces références ensemble.
 - Le pare-feu doit précéder le démarrage automatique de Docker/qBittorrent. Conserver le filtrage de l'hôte et des destinations privées/métadonnées, les réponses RPC établies et le refus temporaire pendant la reconstruction des règles.
 - Garder PostgreSQL `5432` et le RPC qBittorrent `8080` internes. Nginx renvoie 404 pour `/api/internal/` ; `/_protected/` reste réservé aux redirections internes autorisées, avec protection contre les liens symboliques.
-- `downloads` et `share` sont collectifs. Préserver `downloads` en lecture seule pour le site et FTPS ; seul qBittorrent y écrit. `share` accepte les écritures autorisées du site et de FTPS.
+- `downloads` et `share` sont collectifs. qBittorrent gère `downloads` ; seuls les administrateurs actifs et approuvés peuvent y supprimer des fichiers ou dossiers via le site et FTPS. Upload, renommage et création y restent interdits. Les montages `web` et `ftp` permettent cette suppression ; celui de Nginx reste en lecture seule. `share` accepte les écritures autorisées du site et de FTPS.
 - FTPS impose TLS sur commandes et données. Une erreur de l'API interne ou une révocation doit fermer les sessions existantes ; ne pas remplacer ce comportement par une autorisation permissive.
 - Le renouvellement prépare un PEM vérifié, recharge Nginx et redémarre FTP lorsqu'il change. Préserver `.reload-pending` pour reprendre un rechargement interrompu.
 

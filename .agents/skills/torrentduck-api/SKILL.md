@@ -36,8 +36,11 @@ helper partagé, ses appelants et les tests associés avant de changer le contra
   limites de débit et l'audit des routes voisines sans journaliser de secrets.
 - Fichiers : utiliser `fileSpace`, `relativePath`, `fileName` et `resolveFile`
   de `files.ts`. Préserver le refus des traversées/liens symboliques, l'ouverture
-  sans suivi de lien et les opérations sans écrasement concurrent. Seul `share`
-  est modifiable directement ; ne pas charger un upload entier en mémoire.
+  sans suivi de lien et les opérations sans écrasement concurrent. `share`
+  est modifiable directement ; dans `downloads`, seuls les administrateurs actifs
+  et approuvés peuvent supprimer des fichiers ou dossiers, avec confirmation web.
+  Upload, renommage et création y restent interdits. Ne pas charger un upload
+  entier en mémoire.
 - Conserver `requireStorage` et la réserve de 10 %, y compris pendant un upload.
   Une erreur ou une annulation nettoie les fichiers temporaires.
 - Téléchargement : préserver GET/HEAD, Range/416 et les modes `FILE_DELIVERY=node`

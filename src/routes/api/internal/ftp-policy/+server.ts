@@ -5,6 +5,6 @@ import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ request }) => {
   requireInternal(request);
-  const [policy] = await query<{ revision: string }>("SELECT COALESCE(max(id),0)::text AS revision FROM audit_log WHERE action IN ('user.delete','user.password-reset','user.password-change') OR (action='user.update' AND (details->>'enabled'='false' OR details->>'approved'='false'))");
+  const [policy] = await query<{ revision: string }>("SELECT COALESCE(max(id),0)::text AS revision FROM audit_log WHERE action IN ('user.delete','user.password-reset','user.password-change') OR (action='user.update' AND (details->>'enabled'='false' OR details->>'approved'='false' OR details->>'roleChanged'='true'))");
   return json(policy);
 };

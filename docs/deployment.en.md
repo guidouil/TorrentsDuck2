@@ -175,10 +175,11 @@ Before opening access to members:
 - In a signed-out browser, display the login QR code and scan it with a phone. Check that signing in on the phone returns to confirmation, compare the codes, explicitly approve, and verify that the first browser signs in automatically. Also test denial and expiry after five minutes; pending or disabled accounts must not be able to approve a device. Use the same HTTPS site address on both devices.
 - Sign in to the same account in several browsers, including the TV, then sign out from one: all its web access must be denied immediately and open screens must return to sign-in within a few seconds. Check that an approved but unused QR code cannot reconnect the TV and that another account stays signed in.
 - Test video seeking, a VLC link, its revocation and expiration, and a format unsupported by the browser. On Android, iPhone and iPad (including desktop mode), check the “Open in VLC” button in the link dialog with VLC installed; also check that copying the link remains available without VLC.
-- In FileZilla/Cyberduck, require **explicit FTP over TLS**, using the certificate hostname and port `21000`. Check downloads, writes to `share` and denial of writes to `downloads`. Reject plain FTP and unencrypted data channels.
-- Disable a connected member: all FTPS sessions must close within a few seconds, and the revoked account must fail to reconnect. Unavailability of the internal API must also close sessions.
+- On the website, check that an active, approved administrator can delete a file or folder from `downloads` after confirmation and that an ordinary member cannot, including through the API. Deletion is permanent for the whole community; files still managed by qBittorrent may be reported missing or downloaded again.
+- In FileZilla/Cyberduck, require **explicit FTP over TLS**, using the certificate hostname and port `21000`. Check downloads and writes to `share`. In `downloads`, check that administrators can delete files and folders and members cannot, and that uploads, renaming and creation are denied for both roles. Reject plain FTP and unencrypted data channels.
+- Disable a connected member or revoke an administrator's role: all FTPS sessions must close within a few seconds, and new connections must enforce the updated permissions. Unavailability of the internal API must also close sessions.
 - From the qBittorrent container, check that `169.254.169.254`, `172.30.20.1` and PostgreSQL's private address are unreachable, while a public tracker and RPC access from `web` work. Repeat after a host restart.
-- On a test volume, simulate the 10% free-space threshold: new transfers/uploads must be rejected before the disk fills. Pure-FTPd also applies a 90% disk limit.
+- On a test volume, simulate the 10% free-space threshold: new transfers/uploads, including FTPS, must be rejected before the disk fills.
 - Create an encrypted backup outside the host, restore it into an empty test database, and verify an account with a known password.
 
 These checks require actual verification of certificates, passive ports, storage, performance and restoration on the host or an equivalent machine. This documentation does not certify that they have passed.
@@ -275,7 +276,7 @@ sudo systemctl restart torrentduck.service
 sudo systemctl start torrentduck-certificates.service
 ```
 
-Restarting the stack interrupts services and ongoing transfers. The timer checks certificates twice daily, with a random delay of up to one hour. Renewal updates the FTPS PEM, checks the certificate and key, reloads Nginx and restarts Pure-FTPd; active FTPS sessions may be interrupted. After changing Docker or firewall rules, reapply `sudo sh deploy/firewall.sh` before restarting torrents. The dedicated unit is installed before Docker to apply this policy at boot.
+Restarting the stack interrupts services and ongoing transfers. The timer checks certificates twice daily, with a random delay of up to one hour. Renewal updates the FTPS PEM, checks the certificate and key, reloads Nginx and restarts the FTPS server; active FTPS sessions may be interrupted. After changing Docker or firewall rules, reapply `sudo sh deploy/firewall.sh` before restarting torrents. The dedicated unit is installed before Docker to apply this policy at boot.
 
 Test ACME renewal without replacing the production certificate or adding another random delay; replace `duck.example.com` with the value of `DOMAIN` in `.env`:
 
@@ -283,7 +284,7 @@ Test ACME renewal without replacing the production certificate or adding another
 sudo docker compose --profile maintenance run --rm certbot renew --cert-name duck.example.com --dry-run --webroot -w /var/www/acme --no-random-sleep-on-renew
 ```
 
-The FTPS guard checks permissions every 5 seconds, with a maximum HTTP timeout of 3 seconds. Disabling or deleting an account, or changing its password, closes **all** FTPS sessions, including other members' sessions. Clients must reconnect and resume transfers. When the policy is unavailable, the container waits for the application before reopening its listener. The `downloads` mount is read-only; replacement of existing FTPS files is atomic.
+The FTPS guard checks permissions every 5 seconds, with a maximum HTTP timeout of 3 seconds. Disabling or deleting an account, or changing its password or role, closes **all** FTPS sessions, including other members' sessions. Clients must reconnect and restart transfers. When the policy is unavailable, the container waits for the application before reopening its listener. `downloads` is mounted writable in `web` and `ftp` to support deletion restricted to administrators; Nginx keeps it read-only. Application checks still forbid uploads, renaming and creation in `downloads`. In `share`, FTPS uploads are published atomically without overwriting an existing file; appending and resuming partial uploads are refused. Interrupted uploads must start again using `STOR` and an unused filename; `STOU` is refused. To switch FTPS accounts, disconnect and reconnect.
 
 Docker logs are limited to 3 × 10 MB per service. Nginx disables its access log to protect playback and recovery link tokens. The application has no access to the Docker socket.
 
@@ -341,6 +342,8 @@ install -m 755 scripts/update.sh "$HOME/deploy-torrentduck.sh"
 
 For later updates, run `~/deploy-torrentduck.sh`, **without sudo before the script**. Git uses the current account; sudo requests its password for Docker and system operations. The checkout must have a branch with an upstream configured. The script rejects concurrent deployments and local changes, including untracked files that are not ignored, then runs `git pull --ff-only` and calls `scripts/deploy.sh`: image builds, schema, firewall and systemd units remain managed by the existing procedure. It then recreates Nginx to apply its template and checks `/api/health` through public HTTPS. Web and FTPS sessions may be interrupted.
 
+Administrator deletion in `downloads` requires this full update to rebuild the images and recreate the `web` and `ftp` containers with their new mounts; restarting alone is insufficient.
+
 Cleanup runs before building and on exit, including failures: only untagged project images that are no longer used by any container are removed. Unused build cache in the default Docker builder is reduced with `--keep-storage 1GB`; this cache is shared with any other projects on the host. The script requires at least 10% free plus 5 GiB on the Docker filesystem before building. It creates no archive or backup image tag and removes no volume, shared file, download or existing backup. Output stays in the terminal.
 
 Keep regular off-host backups and test their restoration separately: this script does not create one for every deployment. It does not automatically pull new PostgreSQL or Certbot images; update those as a maintenance operation. Review any new `.env.example` variables before deploying. Preserve `.env`, `DATA_ROOT` and existing secrets, particularly `POSTGRES_ADMIN_PASSWORD`, `POSTGRES_PASSWORD` and the password in `DATABASE_URL`: changing only these variables does not change the passwords of an initialized database. Rotation must coordinate PostgreSQL and application configuration. Keep PostgreSQL on major version 17 for this procedure; a major version upgrade requires a dedicated migration. Repeat the functional checks after updating.
@@ -351,9 +354,12 @@ On a development or test machine, with Docker accessible to the account running 
 
 ```sh
 docker compose --env-file .env.example build
+docker run --rm --entrypoint python3 -v "$PWD/deploy/ftp:/checks:ro" torrentduck-ftp /checks/test_server.py
 python3 tests/infrastructure.integration.py
 ```
 
+The command inside the FTPS image tests paths, uploads, the disk reserve and renames using temporary files, without connecting to an existing service.
+
 The test requires **the available subnet `172.30.20.0/24` and free local ports `50000–50100`**. A production stack already uses these resources: use a separate test instance. The script creates and removes its `duck-infra-…` containers and temporary network; it does not modify the host firewall.
 
-It exercises protected RPC, torrent addition/stop/resume and qBittorrent persistence, Nginx X-Accel and `Range` requests, mandatory FTPS TLS, read-only access, writes/renames/deletions and session revocation. The torrent is a local fixture without a tracker, with DHT/PEX/local discovery disabled. The self-signed certificate is limited to this test. The authentication API is simulated; application tests cover accounts and permissions separately. This test does not verify public ACME, external passive routing, the Linux firewall, Internet peers or host performance.
+It exercises protected RPC, torrent addition/stop/resume and qBittorrent persistence, Nginx X-Accel and `Range` requests, mandatory FTPS TLS, member and administrator permissions in `downloads`, writes/renames/deletions in `share` and session revocation. The torrent is a local fixture without a tracker, with DHT/PEX/local discovery disabled. The self-signed certificate is limited to this test. The authentication API is simulated; application tests cover accounts and permissions separately. This test does not verify public ACME, external passive routing, the Linux firewall, Internet peers or host performance.

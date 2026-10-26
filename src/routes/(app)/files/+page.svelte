@@ -6,9 +6,11 @@
   import { language, t } from '#lib/i18n.js';
   import Modal from '#lib/Modal.svelte';
   import Icon from '#lib/Icon.svelte';
+  let { data } = $props();
   type Entry = { name: string; path: string; directory: boolean; size: number; modifiedAt: string };
   const location = $derived(page.shallow?.url ?? page.url);
   const space = $derived(location.searchParams.get('space') === 'share' ? 'share' : 'downloads');
+  const canDelete = $derived(space === 'share' || data.user?.role === 'admin');
   const path = $derived(location.searchParams.get('path') ?? '');
   const query = $derived(location.searchParams.get('search') ?? '');
   const sort = $derived(location.searchParams.get('sort') ?? 'modifiedAt');
@@ -60,7 +62,7 @@
 <section class="panel explorer-panel" aria-label={$t.files}>
   <div class="toolbar explorer-toolbar">
     <div class="tabs" aria-label={$t.files}>
-      <button class={{ selected: space === 'downloads' }} aria-pressed={space === 'downloads'} title={$t.downloadsDescription} disabled={busy} onclick={() => switchSpace('downloads')}><Icon name="download" size={18} />{$t.downloads}</button>
+      <button class={{ selected: space === 'downloads' }} aria-pressed={space === 'downloads'} title={data.user?.role === 'admin' ? $t.downloadsAdminDescription : $t.downloadsDescription} disabled={busy} onclick={() => switchSpace('downloads')}><Icon name="download" size={18} />{$t.downloads}</button>
       <button class={{ selected: space === 'share' }} aria-pressed={space === 'share'} title={$t.shareDescription} disabled={busy} onclick={() => switchSpace('share')}><Icon name="folder" size={18} />{$t.shared}</button>
     </div>
     <input class="search" type="search" placeholder={$t.search} aria-label={$t.search} value={query} oninput={(event) => browse({ search: event.currentTarget.value, offset: '' }, Boolean(query))} />
@@ -79,7 +81,7 @@
   <div class="table-wrap">
     <!-- Preserve table semantics when CSS displays rows as cards. -->
       <!-- svelte-ignore a11y_no_redundant_roles -->
-      <table role="table" aria-label={$t.files} class={{ editable: space === 'share' }}>
+      <table role="table" aria-label={$t.files} class={{ editable: canDelete }}>
       <thead role="rowgroup"><tr role="row"><th scope="col">{$t.name}</th><th scope="col">{$t.size}</th><th scope="col">{$t.date}</th><th scope="col"><span class="sr-only">{$t.actions}</span></th></tr></thead>
       <tbody role="rowgroup">
         {#each entries as entry (entry.path)}
@@ -87,7 +89,7 @@
             <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" disabled={busy} onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name={fileIcon(entry.name)} /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.size}</span>{entry.directory ? '—' : bytes(entry.size)}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.date}</span>{new Date(entry.modifiedAt).toLocaleDateString($language)}</td>
-            <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={18} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => { video = entry; videoOpen = true; }}><Icon name="play" size={18} /><span class="action-label">{$t.play}</span></button><button class="icon-button" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="share" size={18} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={18} /><span class="action-label">{$t.rename}</span></button><button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={18} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
+            <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={18} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => { video = entry; videoOpen = true; }}><Icon name="play" size={18} /><span class="action-label">{$t.play}</span></button><button class="icon-button" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="share" size={18} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={18} /><span class="action-label">{$t.rename}</span></button>{/if}{#if canDelete}<button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={18} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
           </tr>
         {/each}
       </tbody>
@@ -107,7 +109,7 @@
     <dt>{$t.ftpsTransferMode}</dt><dd>{$t.ftpsPassive}</dd>
   </dl>
   <p>{$t.ftpsCredentials}</p>
-  <p><code>/downloads</code> — {$t.downloadsDescription}<br /><code>/share</code> — {$t.shareDescription}</p>
+  <p><code>/downloads</code> — {data.user?.role === 'admin' ? $t.downloadsAdminDescription : $t.downloadsDescription}<br /><code>/share</code> — {$t.shareDescription}</p>
   <p>{$t.ftpsSharedFolders}</p>
   <div class="dialog-actions"><button type="button" class="primary" onclick={() => { ftpsOpen = false; }}>{$t.close}</button></div>
 </Modal>

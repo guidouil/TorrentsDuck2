@@ -1,12 +1,18 @@
-import { beforeEach, afterEach, describe, it, expect } from 'vitest';
+import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm, readdir, utimes } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
 import { relativePath, resolveFile, listFiles, changeFiles, downloadFile, uploadFile, byteRange, moveWithoutReplacement } from '../src/lib/server/files';
+import { POST } from '../src/routes/api/files/+server';
+
+const mocks = vi.hoisted(() => ({ member: vi.fn(), audit: vi.fn() }));
+vi.mock('../src/lib/server/permissions', () => ({ requireMember: mocks.member }));
+vi.mock('../src/lib/server/audit', () => ({ audit: mocks.audit }));
 
 let directory: string;
 beforeEach(async () => {
+	vi.resetAllMocks();
 	directory = await mkdtemp(path.join(os.tmpdir(), 'duck-files-'));
 	process.env.DATA_ROOT = directory;
 	process.env.DOWNLOADS_DIR = path.join(directory, 'downloads');
@@ -20,8 +26,34 @@ afterEach(async () => { await rm(directory, { recursive: true, force: true }); }
 
 function event(url: string, options: RequestInit = {}) {
 	const request = new Request(url, options);
-	return { request, url: new URL(url) } as RequestEvent;
+	return { request, url: new URL(url) } as RequestEvent<Record<string, never>, '/api/files'>;
 }
+
+describe('download deletion API', () => {
+	it.each(['admin', 'member'])('checks the authenticated %s role instead of the request body', async (role) => {
+		mocks.member.mockResolvedValue({ id: role, role });
+		const request = event('http://localhost/api/files', {
+			method: 'POST', headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ space: 'downloads', action: 'delete', path: 'movie.mp4', confirm: true, role: 'admin' })
+		});
+		if (role === 'admin') {
+			expect((await POST(request)).status).toBe(200);
+			expect(await readdir(process.env.DOWNLOADS_DIR!)).toEqual([]);
+		} else {
+			await expect(POST(request)).rejects.toMatchObject({ status: 403 });
+			expect(await readFile(path.join(process.env.DOWNLOADS_DIR!, 'movie.mp4'), 'utf8')).toBe('0123456789');
+		}
+	});
+	it.each([401, 403])('rejects access denied by the membership guard (%s) before deleting', async (status) => {
+		mocks.member.mockRejectedValue({ status });
+		await expect(POST(event('http://localhost/api/files', {
+			method: 'POST', headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ space: 'downloads', action: 'delete', path: 'movie.mp4', confirm: true })
+		}))).rejects.toMatchObject({ status });
+		expect(await readFile(path.join(process.env.DOWNLOADS_DIR!, 'movie.mp4'), 'utf8')).toBe('0123456789');
+		expect(mocks.audit).not.toHaveBeenCalled();
+	});
+});
 
 describe('file listing order', () => {
 	it.each([
@@ -54,10 +86,35 @@ describe('file boundary', () => {
 		const list = await listFiles('share', '', new URLSearchParams());
 		expect(list.entries).toEqual([]);
 	});
-	it('keeps downloads immutable and root undeletable', async () => {
+	it('keeps downloads read-only for members and root undeletable', async () => {
 		await expect(changeFiles({ space: 'downloads', action: 'delete', path: 'movie.mp4', confirm: true })).rejects.toMatchObject({ status: 403 });
+		await expect(changeFiles({ space: 'downloads', action: 'delete', path: 'movie.mp4', confirm: true, role: 'admin' })).rejects.toMatchObject({ status: 403 });
 		await expect(changeFiles({ space: 'share', action: 'delete', path: '', confirm: true })).rejects.toMatchObject({ status: 400 });
 		await expect(changeFiles({ space: 'share', action: 'delete', path: 'anything' })).rejects.toMatchObject({ status: 404 });
+	});
+	it('allows administrators to delete downloads and folders only with confirmation', async () => {
+		await expect(changeFiles({ space: 'downloads', action: 'delete', path: 'movie.mp4' }, 'admin')).rejects.toMatchObject({ status: 400 });
+		await expect(changeFiles({ space: 'downloads', action: 'delete', path: '', confirm: true }, 'admin')).rejects.toMatchObject({ status: 400 });
+		await changeFiles({ space: 'downloads', action: 'delete', path: 'movie.mp4', confirm: true }, 'admin');
+		await mkdir(path.join(process.env.DOWNLOADS_DIR!, 'folder'));
+		await writeFile(path.join(process.env.DOWNLOADS_DIR!, 'folder', 'file.txt'), 'collective');
+		await changeFiles({ space: 'downloads', action: 'delete', path: 'folder', confirm: true }, 'admin');
+		expect(await readdir(process.env.DOWNLOADS_DIR!)).toEqual([]);
+	});
+	it.each(['mkdir', 'rename'])('rejects administrator %s in downloads', async (action) => {
+		await expect(changeFiles({ space: 'downloads', action, path: 'movie.mp4', name: 'other' }, 'admin')).rejects.toMatchObject({ status: 403 });
+		expect(await readFile(path.join(process.env.DOWNLOADS_DIR!, 'movie.mp4'), 'utf8')).toBe('0123456789');
+	});
+	it('rejects unsafe paths and symbolic links during administrator deletion', async () => {
+		await symlink(process.env.SHARE_DIR!, path.join(process.env.DOWNLOADS_DIR!, 'escape'));
+		await expect(changeFiles({ space: 'downloads', action: 'delete', path: '../share', confirm: true }, 'admin')).rejects.toMatchObject({ status: 400 });
+		await expect(changeFiles({ space: 'downloads', action: 'delete', path: 'escape', confirm: true }, 'admin')).rejects.toMatchObject({ status: 403 });
+		expect(await readdir(process.env.SHARE_DIR!)).toEqual([]);
+	});
+	it('rejects uploads in downloads', async () => {
+		const form = new FormData();
+		form.set('file', new File(['forbidden'], 'upload.txt'));
+		await expect(uploadFile(event('http://localhost/api/files?space=downloads', { method: 'POST', body: form }))).rejects.toMatchObject({ status: 403 });
 	});
 	it('requires destructive confirmation and refuses rename collisions', async () => {
 		await writeFile(path.join(process.env.SHARE_DIR!, 'one'), 'original');

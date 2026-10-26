@@ -31,7 +31,7 @@ export const POST: RequestHandler = async (event) => {
       await client.query('DELETE FROM "deviceCode" WHERE "userId"=$1', [id]);
       await client.query('UPDATE playback_tokens SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL', [id]);
     }
-    await client.query('INSERT INTO audit_log(user_id,action,target,details) VALUES ($1,\'user.update\',$2,$3)', [admin.id, id, JSON.stringify({ enabled: updated.enabled, approved: updated.approved, role: updated.role, canManageSources: updated.canManageSources })]);
+    await client.query('INSERT INTO audit_log(user_id,action,target,details) VALUES ($1,\'user.update\',$2,$3)', [admin.id, id, JSON.stringify({ enabled: updated.enabled, approved: updated.approved, role: updated.role, canManageSources: updated.canManageSources, roleChanged: updated.role !== current.role })]);
     return updated;
   });
   return json({ user });

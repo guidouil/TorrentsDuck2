@@ -40,6 +40,6 @@ mv "$temporary" "${temporary%.new}"
 docker compose up -d nginx ftp
 docker compose exec -T nginx nginx -t
 docker compose exec -T nginx nginx -s reload
-# Pure-FTPd loads its certificate on process startup.
+# The FTPS server loads its certificate on process startup.
 docker compose restart ftp
 rm "${data_root%/certificates}/ftp-tls/.reload-pending"

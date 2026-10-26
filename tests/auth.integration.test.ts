@@ -246,9 +246,26 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
   it('uses the same legacy upgrade over private FTPS authentication and rejects the wrong secret', async () => {
     await expect(ftpRoute.POST(event('/api/internal/ftp-auth', { username: `${prefix}-ftp`, password }))).rejects.toMatchObject({ status: 401 });
     const response = await ftpRoute.POST(event('/api/internal/ftp-auth', { username: `${prefix}-ftp`, password }, '', true));
-    expect(await response.json()).toEqual({ authorized: true });
+    expect(await response.json()).toEqual({ authorized: true, role: 'member' });
     const { rows: [credential] } = await db.query('SELECT password FROM account WHERE "userId"=$1', [ftpId]);
     expect(credential.password).not.toContain('meteor$');
+  });
+
+  it('returns FTPS administrator rights and revokes them when the role changes', async () => {
+    const policyRoute = await import('../src/routes/api/internal/ftp-policy/+server');
+    const administrator = await ftpRoute.POST(event('/api/internal/ftp-auth', { username: `${prefix}-admin`, password }, '', true));
+    expect(await administrator.json()).toEqual({ authorized: true, role: 'admin' });
+    const initial = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
+    await adminRoutes.POST(event('/api/admin/users', { id: ftpId, role: 'admin' }, adminCookie));
+    const before = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
+    expect(BigInt(before.revision)).toBeGreaterThan(BigInt(initial.revision));
+    await adminRoutes.POST(event('/api/admin/users', { id: ftpId, canManageSources: true }, adminCookie));
+    expect(await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json()).toEqual(before);
+    await adminRoutes.POST(event('/api/admin/users', { id: ftpId, role: 'member', canManageSources: false }, adminCookie));
+    const after = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
+    expect(BigInt(after.revision)).toBeGreaterThan(BigInt(before.revision));
+    const demoted = await ftpRoute.POST(event('/api/internal/ftp-auth', { username: `${prefix}-ftp`, password }, '', true));
+    expect(await demoted.json()).toEqual({ authorized: true, role: 'member' });
   });
 
   it('blocks native Better Auth signup and member administration without leaking account secrets', async () => {

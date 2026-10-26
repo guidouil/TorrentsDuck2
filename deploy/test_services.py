@@ -138,7 +138,7 @@ esac
         for service in ["web", "qbittorrent"]:
             downloads = next(mount for mount in services[service]["volumes"] if mount["target"] == "/data/downloads")
             self.assertEqual(downloads["source"], "downloads")
-            self.assertEqual(downloads.get("read_only", False), service == "web")
+            self.assertFalse(downloads.get("read_only", False))
         self.assertEqual(set(configuration["volumes"]), {"postgres", "downloads", "share", "qbittorrent"})
 
     @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
@@ -375,9 +375,12 @@ esac
         def accept(request, timeout):
             self.assertEqual(json.loads(request.data)["username"], "é space")
             self.assertEqual(request.headers["Authorization"], "Bearer " + "s" * 32)
-            return Response(b'{"authorized":true}')
+            return Response(b'{"authorized":true,"role":"member"}')
 
-        self.assertTrue(ftp.authenticate(environment, accept))
+        self.assertEqual(ftp.authenticate(environment, accept), "member")
+        self.assertEqual(ftp.authenticate(environment, lambda *a, **k: Response(b'{"authorized":true,"role":"admin"}')), "admin")
+        self.assertFalse(ftp.authenticate(environment, lambda *a, **k: Response(b'{"authorized":true}')))
+        self.assertFalse(ftp.authenticate(environment, lambda *a, **k: Response(b'{"authorized":true,"role":"other"}')))
         self.assertFalse(ftp.authenticate({**environment, "AUTHD_ENCRYPTED": "0"}, accept))
         self.assertFalse(ftp.authenticate(environment, lambda *a, **k: Response(b'{"authorized":"true"}')))
         self.assertFalse(ftp.authenticate(environment, lambda *a, **k: Response(b"not-json")))

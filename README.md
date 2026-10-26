@@ -25,10 +25,12 @@ The entire project was orchestrated with **OpenAI Sol 6.1 Ultra**.
 
 | Space | Purpose | Member access |
 | --- | --- | --- |
-| `downloads` | Files managed by qBittorrent | Read through the website and FTPS |
+| `downloads` | Files managed by qBittorrent | Read through the website and FTPS; administrators can delete files and folders |
 | `share` | Files contributed by the community | Read and write through the website and FTPS |
 
 Both spaces are collective. Removing a torrent keeps its files; deleting its data requires explicit confirmation and affects the whole community.
+
+Active, approved administrators can also delete files and folders directly from `downloads` through the website and FTPS. Deletion is permanent for everyone; the website asks for confirmation. Uploads, renaming and folder creation remain forbidden there. Files still managed by qBittorrent may be reported missing or downloaded again.
 
 ## Local Docker
 
@@ -113,7 +115,7 @@ docker compose --env-file .env.example config --no-env-resolution -q
 
 Follow the Ubuntu 24.04 LTS and Docker deployment guide in [English](docs/deployment.en.md) or [French](docs/deployment.md), then the [Meteor migration and backup guide (French)](docs/migration-backups.md) if needed. Installation covers ports, secrets, PostgreSQL, HTTPS/FTPS certificates, the first administrator, backups and updates. No script reformats a disk, and no SSH credentials are bundled. PostgreSQL and qBittorrent RPC do not publish ports. HTTP downloads require session authorization before Nginx serves the files.
 
-Both spaces are collective: qBittorrent manages `downloads`, which is readable through the website and FTPS; `share` is writable through both. Explicit FTPS uses port 21000 and requires TLS for commands and data.
+Both spaces are collective: qBittorrent manages `downloads`, which members can read and administrators can delete from through the website and FTPS; `share` is writable through both. Explicit FTPS uses port 21000 and requires TLS for commands and data.
 
 An optional encrypted FTP backup can run directly from the server every night, without a Mac running: it includes the full PostgreSQL database and configuration, followed by files from `share` that fit within the quota, starting with the smallest. It is disabled by default; the [backup guide (French)](docs/migration-backups.md#sauvegarde-ftp-automatique-depuis-le-serveur) describes `age` keys, the 100 GB quota, retention and restoration. Downloads and qBittorrent state remain excluded.
 

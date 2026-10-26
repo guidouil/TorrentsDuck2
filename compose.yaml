@@ -79,7 +79,7 @@ services:
       QBT_DOWNLOAD_PATH: /data/downloads
       FILE_DELIVERY: nginx
     volumes:
-      - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads:ro
+      - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads
       - ${DATA_ROOT:-/srv/torrentduck}/share:/data/share
       - /sys/fs/cgroup:/host-cgroup:ro
     networks: [edge, database, rpc, auth]
@@ -151,15 +151,14 @@ services:
     ports: ['21000:21000', '50000-50100:50000-50100']
     volumes:
       - ${DATA_ROOT:-/srv/torrentduck}/ftp-tls:/etc/ssl/private:ro
-      - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads:ro
+      - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads
       - ${DATA_ROOT:-/srv/torrentduck}/share:/data/share
     networks: [ftp_edge, auth]
     depends_on: [web]
     read_only: true
     tmpfs: [/run:size=4m, '/tmp:size=16m,mode=1777']
     cap_drop: [ALL]
-    # Debian Pure-FTPd explicitly retains these startup capabilities before dropping privileges.
-    cap_add: [SETUID, SETGID, CHOWN, NET_BIND_SERVICE, SYS_CHROOT, SYS_NICE, DAC_READ_SEARCH, AUDIT_WRITE, KILL]
+    cap_add: [SETUID, SETGID, SYS_CHROOT, KILL]
     security_opt: [no-new-privileges:true]
     mem_limit: 256m
     logging: *logging

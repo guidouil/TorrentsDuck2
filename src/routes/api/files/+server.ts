@@ -23,5 +23,5 @@ export const POST: RequestHandler = async (event) => {
 	}
 	const input = await readJson(event.request);
 	await audit(user.id, `file.${input.action}.requested`, { space: input.space, path: input.path });
-	return json(await changeFiles(input));
+	return json(await changeFiles(input, user.role));
 };

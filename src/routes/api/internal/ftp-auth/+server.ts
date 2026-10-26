@@ -10,6 +10,7 @@ export const POST: RequestHandler = async ({ request }) => {
   const identifier = body.username ?? body.identifier;
   if (typeof identifier !== 'string' || typeof body.password !== 'string' || identifier.length > 320) error(401, 'Unauthorized');
   rateLimit(`ftp:${identifier}`, 10);
-  if (!await verifyCredentials(identifier, body.password)) error(401, 'Unauthorized');
-  return json({ authorized: true });
+  const user = await verifyCredentials(identifier, body.password);
+  if (!user) error(401, 'Unauthorized');
+  return json({ authorized: true, role: user.role });
 };

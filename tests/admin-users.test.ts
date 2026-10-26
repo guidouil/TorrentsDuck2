@@ -30,7 +30,7 @@ describe('source management permission administration', () => {
     const response = await POST(event({ id: member.id, canManageSources }) as never);
     expect((await response.json()).user).toMatchObject({ role: 'member', canManageSources });
     expect(mocks.clientQuery).toHaveBeenCalledWith(expect.stringContaining('"canManageSources"=COALESCE($5,"canManageSources")'), [member.id, null, null, null, canManageSources]);
-    expect(mocks.clientQuery).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO audit_log'), [admin.id, member.id, JSON.stringify({ enabled: true, approved: true, role: 'member', canManageSources })]);
+    expect(mocks.clientQuery).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO audit_log'), [admin.id, member.id, JSON.stringify({ enabled: true, approved: true, role: 'member', canManageSources, roleChanged: false })]);
     expect(mocks.clientQuery.mock.calls.some(([sql]) => sql.startsWith('DELETE FROM session'))).toBe(false);
   });
 

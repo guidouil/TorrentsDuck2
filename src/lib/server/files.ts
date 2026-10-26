@@ -10,6 +10,7 @@ import { error } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import busboy from 'busboy';
 import { requireStorage } from './storage';
+import type { Member } from './permissions';
 
 const run = promisify(execFile);
 
@@ -78,17 +79,18 @@ export async function listFiles(space: Space, requested: string, options: URLSea
 	return { space, path: directory.relative, entries: entries.slice(offset, offset + limit), total: entries.length, offset, limit };
 }
 
-export async function changeFiles(input: Record<string, unknown>) {
-	if (fileSpace(input.space) !== 'share') error(403, 'Les téléchargements sont gérés par le moteur.');
-	const source = await resolveFile('share', input.path ?? '');
+export async function changeFiles(input: Record<string, unknown>, role: Member['role'] = 'member') {
+	const space = fileSpace(input.space);
+	if (space === 'downloads' && (role !== 'admin' || input.action !== 'delete')) error(403, 'Seuls les administrateurs peuvent supprimer les téléchargements.');
+	const source = await resolveFile(space, input.path ?? '');
 	if (input.action === 'mkdir') {
 		if (!(await lstat(source.absolute)).isDirectory()) error(400, 'Dossier requis.');
-		const destination = await resolveFile('share', path.posix.join(source.relative, fileName(input.name)), true);
+		const destination = await resolveFile(space, path.posix.join(source.relative, fileName(input.name)), true);
 		try { await mkdir(destination.absolute, { mode: 0o2770 }); }
 		catch (cause) { if ((cause as NodeJS.ErrnoException).code === 'EEXIST') error(409, 'Ce nom existe déjà.'); throw cause; }
 	} else if (input.action === 'rename') {
 		if (!source.relative) error(403, 'Impossible de renommer la racine.');
-		const destination = await resolveFile('share', path.posix.join(path.posix.dirname(source.relative) === '.' ? '' : path.posix.dirname(source.relative), fileName(input.name)), true);
+		const destination = await resolveFile(space, path.posix.join(path.posix.dirname(source.relative) === '.' ? '' : path.posix.dirname(source.relative), fileName(input.name)), true);
 		await moveWithoutReplacement(source.absolute, destination.absolute);
 	} else if (input.action === 'delete') {
 		if (!source.relative || input.confirm !== true) error(400, 'Confirmation requise pour supprimer.');

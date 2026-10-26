@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 """Fail closed; never emit a credential or an HTTP response body to logs."""
 import json
-import os
 import urllib.request
 
 
@@ -20,13 +19,9 @@ def authenticate(environment, opener=urllib.request.urlopen):
     try:
         with opener(request, timeout=8) as response:
             body = response.read(4097)
-            return response.status == 200 and len(body) <= 4096 and json.loads(body).get("authorized") is True
+            if response.status == 200 and len(body) <= 4096:
+                policy = json.loads(body)
+                if policy.get("authorized") is True and policy.get("role") in ("member", "admin"):
+                    return policy["role"]
     except Exception:
         return False
-
-
-if __name__ == "__main__":
-    if authenticate(os.environ):
-        print("auth_ok:1\nuid:10000\ngid:10000\ndir:/data\nend")
-    else:
-        print("auth_ok:-1\nend")

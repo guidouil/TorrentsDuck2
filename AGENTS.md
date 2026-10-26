@@ -22,8 +22,10 @@ ajouter de dépendance ou d'abstraction pour quelques lignes. Garder les imports
 
 - Un compte doit être actif et approuvé pour accéder aux services. La protection
   des pages ne remplace pas celle des API. Les helpers de `permissions.ts` font foi.
-- `downloads` et `share` sont collectifs. Le site et FTPS lisent `downloads` ;
-  qBittorrent le gère. Seul `share` est directement modifiable par les membres.
+- `downloads` et `share` sont collectifs. qBittorrent gère `downloads` ; seuls
+  les administrateurs actifs et approuvés peuvent y supprimer des fichiers ou
+  dossiers via le site et FTPS. Upload, renommage et création y restent interdits.
+  Les membres peuvent modifier directement `share`.
 - Retirer un torrent conserve ses fichiers ; supprimer ses données exige une
   confirmation explicite et affecte toute la communauté.
 - Conserver les protections des chemins, les écritures sans écrasement, la

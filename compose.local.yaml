@@ -54,7 +54,7 @@ services:
       BODY_SIZE_LIMIT: '1073741824'
     ports: ['127.0.0.1:5180:3000']
     volumes:
-      - downloads:/data/downloads:ro
+      - downloads:/data/downloads
       - share:/data/share
     networks: [edge, database, rpc]
     depends_on:

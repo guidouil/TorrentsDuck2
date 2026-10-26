@@ -3,16 +3,17 @@ import { runInNewContext } from 'node:vm';
 import { transpile } from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 
-function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedValue({ entries: [], total: 0 }), device = { userAgent: '', maxTouchPoints: 0 }) {
+function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedValue({ entries: [], total: 0 }), device = { userAgent: '', maxTouchPoints: 0 }, role = 'member') {
   const goto = vi.fn();
   const script = readFileSync(new URL('../src/routes/(app)/files/+page.svelte', import.meta.url), 'utf8')
     .split('<script lang="ts">')[1].split('</script>')[0].replace(/^\s*import .+;\s*$/gm, '');
   const context: Record<string, any> = {
     URL, URLSearchParams, api, goto, navigator: device,
     page: { url: new URL(url), shallow: shallowUrl ? { url: new URL(shallowUrl) } : null },
+    $props: () => ({ data: { user: { role } } }),
     $state: (value: unknown) => value, $derived: (value: unknown) => value, $effect: () => {}
   };
-  runInNewContext(transpile(`${script}\nglobalThis.explorer = { browse, enter, switchSpace, loadFiles, fileIcon, mobileVlcUrl, makeLink, state: () => ({ space, path, query, sort, offset, entries, loading, busy, error, link, linkOpen, vlcLink }) };`), context);
+  runInNewContext(transpile(`${script}\nglobalThis.explorer = { browse, enter, switchSpace, loadFiles, fileIcon, mobileVlcUrl, makeLink, ask, mutate, state: () => ({ space, path, query, sort, offset, entries, loading, busy, error, link, linkOpen, vlcLink, canDelete, dialogOpen, selected }) };`), context);
   return { api, goto, ...context.explorer as {
     browse: (values: Record<string, string>, replace?: boolean) => void;
     enter: (path: string) => void;
@@ -21,12 +22,36 @@ function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedVa
     fileIcon: (name: string) => string;
     mobileVlcUrl: (url: string, name: string) => string;
     makeLink: (entry: { name: string; path: string }) => Promise<void>;
-    state: () => { space: string; path: string; query: string; sort: string; offset: number; entries: unknown[]; loading: boolean; busy: boolean; error: string; link: unknown; linkOpen: boolean; vlcLink: string };
+    ask: (action: string, entry: { name: string; path: string }) => void;
+    mutate: (event: { preventDefault: () => void }) => Promise<void>;
+    state: () => { space: string; path: string; query: string; sort: string; offset: number; entries: unknown[]; loading: boolean; busy: boolean; error: string; link: unknown; linkOpen: boolean; vlcLink: string; canDelete: boolean; dialogOpen: boolean; selected: unknown };
   } };
 }
 
 const origin = 'https://duck.example.com/files';
 const shared = `${origin}?space=share&path=Films%2F%C3%89t%C3%A9+2026&search=version+longue&sort=size&offset=50`;
+
+describe('file deletion', () => {
+  it.each([
+    [origin, 'member', false],
+    [origin, 'admin', true],
+    [shared, 'member', true],
+    [shared, 'admin', true]
+  ])('offers deletion for %s as %s: %s', (url, role, expected) => {
+    expect(explorer(url, undefined, undefined, undefined, role).state().canDelete).toBe(expected);
+  });
+
+  it('asks before deleting a download and sends explicit confirmation on submit', async () => {
+    const files = explorer(origin, undefined, undefined, undefined, 'admin');
+    const entry = { name: 'film.mkv', path: 'Films/film.mkv' };
+    files.ask('delete', entry);
+    expect(files.state()).toMatchObject({ dialogOpen: true, selected: entry });
+    expect(files.api).not.toHaveBeenCalled();
+    await files.mutate({ preventDefault() {} });
+    expect(files.api).toHaveBeenCalledWith('/api/files', { method: 'POST', body: JSON.stringify({ action: 'delete', space: 'downloads', path: entry.path, name: '', confirm: true }) });
+    expect(files.state()).toMatchObject({ dialogOpen: false, busy: false, error: '' });
+  });
+});
 
 describe('mobile VLC playback', () => {
   const mediaUrl = `https://duck.example.com/api/files/play/${'x'.repeat(43)}`;
