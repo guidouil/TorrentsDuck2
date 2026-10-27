@@ -86,10 +86,10 @@
       <tbody role="rowgroup">
         {#each entries as entry (entry.path)}
           <tr role="row">
-            <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" disabled={busy} onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name={fileIcon(entry.name)} /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
+            <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" disabled={busy} onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" size={24} /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name={fileIcon(entry.name)} size={24} /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.size}</span>{entry.directory ? '—' : bytes(entry.size)}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.date}</span>{new Date(entry.modifiedAt).toLocaleDateString($language)}</td>
-            <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={18} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => { video = entry; videoOpen = true; }}><Icon name="play" size={18} /><span class="action-label">{$t.play}</span></button><button class="icon-button" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="share" size={18} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={18} /><span class="action-label">{$t.rename}</span></button>{/if}{#if canDelete}<button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={18} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
+            <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={22} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => { video = entry; videoOpen = true; }}><Icon name="play" size={22} /><span class="action-label">{$t.play}</span></button><button class="icon-button warning" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="cone" size={22} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={22} /><span class="action-label">{$t.rename}</span></button>{/if}{#if canDelete}<button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={22} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
           </tr>
         {/each}
       </tbody>
@@ -133,7 +133,7 @@
   table.editable th:last-child{width:220px}
   td,th{padding:8px 12px}
   .file-link{width:100%;min-width:0;max-width:none;gap:8px}
-  .file-glyph{width:28px;height:28px;border-radius:var(--shape-sm)}
+  .file-glyph{width:32px;height:32px;border-radius:var(--shape-sm)}
   .mobile-label,.action-label{display:none}
   .row-actions .icon-button{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;padding:6px}
   .panel-bottom{margin-top:auto;padding:8px 12px;gap:8px}
