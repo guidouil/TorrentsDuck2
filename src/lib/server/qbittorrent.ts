@@ -6,6 +6,7 @@ import { requireStorage } from './storage';
 export interface Torrent {
 	hash: string; name: string; size: number; progress: number; dlspeed: number; upspeed: number;
 	ratio: number; num_leechs: number; num_seeds: number; eta: number; state: string; tags: string;
+	content_path: string; save_path: string;
 }
 
 let cookie = '';

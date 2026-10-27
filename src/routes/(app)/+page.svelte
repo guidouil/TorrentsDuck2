@@ -123,7 +123,7 @@
         <tbody role="rowgroup">
           {#each rows as torrent (torrent.hash)}
             <tr role="row">
-              <td class="name-cell" role="cell"><div class="torrent-name"><span class="file-glyph"><Icon name="transfer" /></span><div class="name-detail"><strong title={torrent.name}>{torrent.name}</strong><small>{bytes(torrent.size)} · ratio {torrent.ratio.toFixed(2)} · {torrent.peers} {$t.peers}</small></div></div></td>
+              <td class="name-cell" role="cell"><div class="torrent-name"><span class="file-glyph"><Icon name="transfer" /></span><div class="name-detail"><a class="torrent-link" href={`/api/torrents/${encodeURIComponent(torrent.hash)}`} data-sveltekit-reload><strong title={torrent.name}>{torrent.name}</strong></a><small>{bytes(torrent.size)} · ratio {torrent.ratio.toFixed(2)} · {torrent.peers} {$t.peers}</small></div></div></td>
               <td class="progress-cell" role="cell"><span class="mobile-label" aria-hidden="true">{$t.progress}</span><div class="progress-caption"><span>{(torrent.progress * 100).toFixed(0)} %</span><span>{#if torrent.progress < 1}{duration(torrent.eta)}{:else}<Icon name="check" size={14} />{/if}</span></div><div class="progress" role="progressbar" aria-label={torrent.name} aria-valuenow={Math.round(torrent.progress * 100)} aria-valuemin={0} aria-valuemax={100}><span style:width={`${torrent.progress * 100}%`}></span></div></td>
               <td role="cell"><span class="mobile-label" aria-hidden="true">{$t.speed}</span><span class="transfer-speed accent"><Icon name="download" size={14} />{bytes(torrent.downloadSpeed)}/s</span><small class="transfer-speed muted"><Icon name="upload" size={14} />{bytes(torrent.uploadSpeed)}/s</small></td>
               <td role="cell"><span class="mobile-label" aria-hidden="true">{$t.state}</span><span class={['badge', { good: torrent.progress >= 1 && !stopped(torrent.state), bad: /error|missing/i.test(torrent.state) }]}>{stateLabel(torrent.state, torrent.progress)}</span></td>
@@ -199,6 +199,8 @@
   th:last-child{width:174px}
   td,th{padding:8px 14px}
   .torrent-name,.name-detail{min-width:0}
+  .torrent-link{display:block;color:var(--accent-ink)}
+  .torrent-link:hover{text-decoration:underline}
   .torrent-name strong{max-width:100%}
   .torrent-name small{line-height:1.6}
   .transfer-speed{display:flex;align-items:center;gap:5px;white-space:nowrap}

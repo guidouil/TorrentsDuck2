@@ -15,6 +15,7 @@ describe('anonymous API boundary', () => {
 		'../src/routes/api/files/download/+server',
 		'../src/routes/api/files/share/+server',
 		'../src/routes/api/torrents/+server',
+		'../src/routes/api/torrents/[hash]/+server',
 		'../src/routes/api/events/+server',
 		'../src/routes/api/chat/+server'
 	])('rejects %s before reading collective data', async (route) => {
