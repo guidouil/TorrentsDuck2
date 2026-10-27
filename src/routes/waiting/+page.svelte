@@ -40,7 +40,7 @@
     catch (e) { error = (e as Error).message; } finally { busy = false; }
   }
 </script>
-<svelte:head><title>{verificationRequired ? $t.verifyEmail : $t.waiting} · Torrents Duck</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
+<svelte:head><title>{verificationRequired ? $t.verifyEmail : $t.waiting} · TorrentsDuck2</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
 <main class="auth-page">
   <section class="auth-card waiting-card">
     <QuackLogo />

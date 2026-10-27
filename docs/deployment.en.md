@@ -6,7 +6,7 @@ To try the project on your computer with Docker, follow the [local Docker sectio
 
 The local image is built for `http://127.0.0.1:5180`: do not reuse it in production. The deployment below keeps its network and Nginx reverse proxy unchanged.
 
-This guide installs Torrents Duck 2 on a **fresh Ubuntu Noble 24.04 LTS amd64 host**, using Docker Engine. Node and PostgreSQL are not required on the host: services run in containers. All domains, addresses and accounts below are examples to replace. No project script reinstalls the operating system or formats a disk.
+This guide installs TorrentsDuck2 on a **fresh Ubuntu Noble 24.04 LTS amd64 host**, using Docker Engine. Node and PostgreSQL are not required on the host: services run in containers. All domains, addresses and accounts below are examples to replace. No project script reinstalls the operating system or formats a disk.
 
 When replacing a Meteor installation, back up the accounts and test their restoration first; see the [migration and backup guide (French)](migration-backups.md). Account migration excludes historical downloads, torrents and chat messages.
 
@@ -75,7 +75,7 @@ sudo ufw allow 53/tcp
 sudo ufw allow 53/udp
 ```
 
-Torrents Duck does not require a local DNS server. Docker's published ports can bypass UFW rules: see [Docker firewall limitations](https://docs.docker.com/engine/install/ubuntu/#firewall-limitations). The dedicated policy in step 5 complements UFW and must be applied before qBittorrent starts.
+TorrentsDuck2 does not require a local DNS server. Docker's published ports can bypass UFW rules: see [Docker firewall limitations](https://docs.docker.com/engine/install/ubuntu/#firewall-limitations). The dedicated policy in step 5 complements UFW and must be applied before qBittorrent starts.
 
 ## 4. Clone and configure the project
 

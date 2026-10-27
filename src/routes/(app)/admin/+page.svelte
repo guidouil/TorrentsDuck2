@@ -14,7 +14,7 @@
   function ask(user: any, update: Omit<UserChange, 'user'>) { error = ''; change = { user, ...update }; changeOpen = true; }
   async function updateUser(update = change) { if (!update) return; busy = true; error = ''; try { if (update.delete) { await api(`/api/admin/users/${encodeURIComponent(update.user.id)}`, { method: 'DELETE', body: JSON.stringify({ confirm: true }) }); } else { await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ id: update.user.id, ...(update.approved !== undefined ? { approved: update.approved } : {}), ...(update.enabled !== undefined ? { enabled: update.enabled } : {}), ...(update.role ? { role: update.role } : {}), ...(update.canManageSources !== undefined ? { canManageSources: update.canManageSources } : {}) }) }); } changeOpen = false; await load(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
 </script>
-<svelte:head><title>{$t.admin} · Torrents Duck</title></svelte:head>
+<svelte:head><title>{$t.admin} · TorrentsDuck2</title></svelte:head>
 <h1 class="sr-only">{$t.admin}</h1>
 <Notification bind:message={error} kind="error" />
 <section class="stat-card backup-card">

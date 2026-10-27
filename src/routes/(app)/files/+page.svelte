@@ -56,7 +56,7 @@
   async function copyLink() { try { await navigator.clipboard.writeText(new URL(link.url, window.location.origin).href); notice = $t.linkCopied; } catch { notice = $t.copyManually; } }
   function downloadPlaylist() { const blob = new Blob([`#EXTM3U\n${new URL(link.url, window.location.origin).href}\n`], { type: 'audio/x-mpegurl' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'torrents-duck.m3u'; a.click(); URL.revokeObjectURL(url); }
 </script>
-<svelte:head><title>{$t.files} · Torrents Duck</title></svelte:head>
+<svelte:head><title>{$t.files} · TorrentsDuck2</title></svelte:head>
 <h1 class="sr-only">{$t.files}</h1>
 <input class="sr-only" type="file" multiple bind:this={filesInput} onchange={upload} aria-label={$t.upload} />
 <section class="panel explorer-panel" aria-label={$t.files}>

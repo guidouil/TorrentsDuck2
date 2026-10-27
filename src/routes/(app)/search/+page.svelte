@@ -170,7 +170,7 @@
   });
 </script>
 
-<svelte:head><title>{$t.searchTorrents} · Torrents Duck</title></svelte:head>
+<svelte:head><title>{$t.searchTorrents} · TorrentsDuck2</title></svelte:head>
 <header class="search-heading"><div><h1>{$t.searchTorrents}</h1><p class="subtitle">{$t.searchHelp}</p></div>{#if canManage}<a class="button secondary" href="/search/sources"><Icon name="settings" size={18} />{$t.searchManageSources}</a>{/if}</header>
 <Notification bind:message={error} kind="error" />
 <Notification bind:message={notice} kind="success" />

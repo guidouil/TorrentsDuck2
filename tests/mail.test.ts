@@ -11,7 +11,7 @@ beforeEach(() => {
   for (const name of ['MAILGUN_API_KEY', 'MAILGUN_DOMAIN', 'MAILGUN_FROM', 'MAILGUN_API_URL', 'SMTP_HOST', 'SMTP_FROM', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_PORT', 'SMTP_SECURE']) vi.stubEnv(name, '');
   vi.stubEnv('MAILGUN_API_KEY', 'mailgun-test-key');
   vi.stubEnv('MAILGUN_DOMAIN', 'mg.example.org');
-  vi.stubEnv('MAILGUN_FROM', 'Torrents Duck <noreply@mg.example.org>');
+  vi.stubEnv('MAILGUN_FROM', 'TorrentsDuck2 <noreply@mg.example.org>');
   fetchMock.mockReset().mockResolvedValue(new Response('{}', { status: 200 }));
   vi.mocked(nodemailer.createTransport).mockReset().mockReturnValue({ sendMail } as never);
   sendMail.mockClear();
@@ -27,8 +27,8 @@ describe('transactional email', () => {
     expect(options).toMatchObject({ method: 'POST', redirect: 'error', headers: { Authorization: `Basic ${Buffer.from('api:mailgun-test-key').toString('base64')}` } });
     expect(options.signal).toBeInstanceOf(AbortSignal);
     expect(Object.fromEntries(options.body.entries())).toEqual({
-      from: 'Torrents Duck <noreply@mg.example.org>', to: 'duck@example.org',
-      subject: 'Torrents Duck — Réinitialisation du mot de passe',
+      from: 'TorrentsDuck2 <noreply@mg.example.org>', to: 'duck@example.org',
+      subject: 'TorrentsDuck2 — Réinitialisation du mot de passe',
       text: expect.stringContaining(url)
     });
     expect(nodemailer.createTransport).not.toHaveBeenCalled();
@@ -39,7 +39,7 @@ describe('transactional email', () => {
     await sendVerificationEmail('duck@example.org', 'https://duck.example.org/api/auth/verify-email?token=verify-secret');
     const [endpoint, { body }] = fetchMock.mock.calls[0];
     expect(endpoint).toBe('https://api.eu.mailgun.net/v3/mg.example.org/messages');
-    expect(body.get('subject')).toBe('Torrents Duck — Confirme ton adresse e-mail');
+    expect(body.get('subject')).toBe('TorrentsDuck2 — Confirme ton adresse e-mail');
     expect(body.get('text')).toContain('token=verify-secret');
   });
 
@@ -47,7 +47,7 @@ describe('transactional email', () => {
     await sendRegistrationEmail('admin@example.org', '<b>Éric & duck</b>', 'eric@example.org', 'https://duck.example.org/admin');
     const [, { body }] = fetchMock.mock.calls[0];
     expect(body.get('to')).toBe('admin@example.org');
-    expect(body.get('subject')).toBe('Torrents Duck — Nouveau compte à valider');
+    expect(body.get('subject')).toBe('TorrentsDuck2 — Nouveau compte à valider');
     expect(body.get('text')).toContain('Pseudo : <b>Éric & duck</b>\nAdresse e-mail : eric@example.org');
     expect(body.get('text')).toContain('https://duck.example.org/admin');
     expect(body.has('html')).toBe(false);
@@ -79,11 +79,11 @@ describe('transactional email', () => {
   it('keeps SMTP delivery when no Mailgun key is configured', async () => {
     vi.stubEnv('MAILGUN_API_KEY', '');
     vi.stubEnv('SMTP_HOST', 'smtp.example.org');
-    vi.stubEnv('SMTP_FROM', 'Torrents Duck <noreply@example.org>');
+    vi.stubEnv('SMTP_FROM', 'TorrentsDuck2 <noreply@example.org>');
     vi.stubEnv('SMTP_PORT', '587');
     await sendResetEmail('duck@example.org', 'https://duck.example.org/reset');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(nodemailer.createTransport).toHaveBeenCalledWith(expect.objectContaining({ host: 'smtp.example.org', port: 587, secure: false, requireTLS: true }));
-    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ from: 'Torrents Duck <noreply@example.org>', to: 'duck@example.org' }));
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ from: 'TorrentsDuck2 <noreply@example.org>', to: 'duck@example.org' }));
   });
 });

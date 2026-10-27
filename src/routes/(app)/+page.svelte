@@ -56,7 +56,7 @@
   const stopped = (state: string) => /paused|stopped|error|missing/i.test(state);
   const stateLabel = (state: string, progress: number) => /error|missing/i.test(state) ? $t.stateError : stopped(state) ? $t.statePaused : progress >= 1 ? $t.stateSharing : /stalled/i.test(state) ? $t.stateWaiting : $t.downloading;
 </script>
-<svelte:head><title>{$t.transfers} · Torrents Duck</title></svelte:head>
+<svelte:head><title>{$t.transfers} · TorrentsDuck2</title></svelte:head>
 <h1 class="sr-only">{$t.transfers}</h1>
 {#snippet activity(values: number[], maximum: number)}
   <svg class="activity-chart" viewBox="0 0 240 36" preserveAspectRatio="none" aria-hidden="true" focusable="false">

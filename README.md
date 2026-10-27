@@ -1,10 +1,10 @@
-# Torrents Duck 2
+# TorrentsDuck2
 
 [Français](README.fr.md) · **English** · [Deployment guide](docs/deployment.en.md) · [Contributing](#contributing) · [Apache 2.0](LICENSE)
 
 **An open source, self-hosted platform for sharing torrents, files and server resources within a community.**
 
-Torrents Duck 2 brings members together around one server, one torrent engine and one shared library. Where individual seedboxes divide a server into separate user spaces, this project pools downloads and storage: every addition grows the library for all approved members.
+TorrentsDuck2 brings members together around one server, one torrent engine and one shared library. Where individual seedboxes divide a server into separate user spaces, this project pools downloads and storage: every addition grows the library for all approved members.
 
 The idea is a lively torrent commons: a community hub where everyone contributes to a shared space. Accounts and permissions control access; files and transfers belong to the collective library.
 
@@ -51,7 +51,7 @@ npm run local:down  # Stop while keeping data
 npm run local:up    # Rebuild and restart after code changes
 ```
 
-Data remains in named volumes dedicated to this local stack, including after `local:down`. Only the website publishes a port, on `127.0.0.1:5180`; PostgreSQL and qBittorrent RPC stay internal. Port `5180` and Docker subnet `172.30.20.0/24` must be available. Another Torrents Duck stack cannot use this subnet at the same time; stopping its containers without releasing its network is not enough.
+Data remains in named volumes dedicated to this local stack, including after `local:down`. Only the website publishes a port, on `127.0.0.1:5180`; PostgreSQL and qBittorrent RPC stay internal. Port `5180` and Docker subnet `172.30.20.0/24` must be available. Another TorrentsDuck2 stack cannot use this subnet at the same time; stopping its containers without releasing its network is not enough.
 
 This configuration uses fictional credentials for local testing, without Nginx, FTPS or real email delivery. qBittorrent runs on an internal network without access to Internet peers or indexers: engine tests use test torrents, simulated search results and local API calls, without public downloads.
 
@@ -85,7 +85,7 @@ Transfer gauges use the peak download and upload rates observed by the server. T
 
 Node.js 24+, PostgreSQL 17 and a qBittorrent instance are required. Copy [.env.example](.env.example) to `.env`, choose secrets, and configure `DATABASE_URL`, `QBT_URL`, `ORIGIN` and local paths.
 
-For email, set `MAILGUN_API_KEY`, `MAILGUN_DOMAIN` (a verified Mailgun domain), `MAILGUN_FROM` (for example `Torrents Duck <noreply@mg.example.com>`) and `MAILGUN_API_URL`: `https://api.mailgun.net` for a US domain or `https://api.eu.mailgun.net` for an EU domain. Password reset, verification and registration notification emails use the Mailgun API. Without a Mailgun key, configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in `.env`. Each registration notifies active, approved administrators with a link to `/admin`; if there is no active administrator, the email is sent to `ADMIN_EMAIL` when configured. Delivery failures are logged without cancelling registration. Keep keys and passwords in `.env`, never in Git.
+For email, set `MAILGUN_API_KEY`, `MAILGUN_DOMAIN` (a verified Mailgun domain), `MAILGUN_FROM` (for example `TorrentsDuck2 <noreply@mg.example.com>`) and `MAILGUN_API_URL`: `https://api.mailgun.net` for a US domain or `https://api.eu.mailgun.net` for an EU domain. Password reset, verification and registration notification emails use the Mailgun API. Without a Mailgun key, configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in `.env`. Each registration notifies active, approved administrators with a link to `/admin`; if there is no active administrator, the email is sent to `ADMIN_EMAIL` when configured. Delivery failures are logged without cancelling registration. Keep keys and passwords in `.env`, never in Git.
 
 Set `ADMIN_EMAIL=admin@example.com` to automatically assign the admin role when that account is created, using a case-insensitive address match. The emailed verification link activates access; the waiting page can resend it if delivery fails or the link expires. Other accounts still require administrator approval. An empty value disables automatic assignment; changing the variable does not modify existing accounts.
 

@@ -88,7 +88,7 @@
   }
 </script>
 
-<svelte:head><title>{$t.login} · Torrents Duck</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
+<svelte:head><title>{$t.login} · TorrentsDuck2</title><meta name="robots" content="noindex,nofollow" /></svelte:head>
 <div class={['auth-page', { 'device-page': phone && qrImage && deviceStatus === 'waiting' }]}>
   {#if phone && qrImage && deviceStatus === 'waiting'}
     <img class="qr-code" src={qrImage} alt={$t.deviceQrAlt} width="256" height="256" />

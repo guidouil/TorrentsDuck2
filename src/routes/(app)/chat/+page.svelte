@@ -18,7 +18,7 @@
   }
   async function send(event: SubmitEvent) { event.preventDefault(); if (busy || !body.trim()) return; busy = true; error = ''; try { await api('/api/chat', { method: 'POST', body: JSON.stringify({ body }) }); body = ''; await load(); await tick(); container?.scrollTo({ top: container.scrollHeight, behavior: 'smooth' }); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
 </script>
-<svelte:head><title>{$t.chat} · Torrents Duck</title></svelte:head>
+<svelte:head><title>{$t.chat} · TorrentsDuck2</title></svelte:head>
 <h1 class="sr-only">{$t.chat}</h1>
 <Notification bind:message={error} kind="error" />
 <section class="panel chat-panel">

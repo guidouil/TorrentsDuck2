@@ -1,5 +1,6 @@
 <script lang="ts">
   import EasterEggs from '#lib/EasterEggs.svelte';
+  import QuackLogo from '#lib/QuackLogo.svelte';
   import Notification from '#lib/Notification.svelte';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
@@ -37,7 +38,7 @@
 <EasterEggs />
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="brand" href="/" aria-label="Torrents Duck" title={$t.rubberDuck}><span class="duck-mark"><Icon name="duck" size={28} /></span><span>Torrents<span class="brand-light">Duck</span></span></a>
+    <QuackLogo href="/" />
     <nav aria-label={$t.mainNavigation}>
       {#each [{ href: '/', label: $t.transfers, icon: 'transfer' }, { href: '/search', label: $t.searchPage, icon: 'search' }, { href: '/files', label: $t.files, icon: 'files' }, { href: '/chat', label: $t.chat, icon: 'chat' }, ...(data.user?.role === 'admin' ? [{ href: '/admin', label: $t.admin, icon: 'settings' }] : [])] as item (item.href)}
         {@const active = page.url.pathname === item.href || (item.href === '/search' && page.url.pathname.startsWith('/search/'))}

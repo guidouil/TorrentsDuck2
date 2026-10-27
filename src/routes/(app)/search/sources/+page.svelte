@@ -74,7 +74,7 @@
   onMount(() => { void load(); return () => { disposed = true; }; });
 </script>
 
-<svelte:head><title>{$t.searchManageSources} · Torrents Duck</title></svelte:head>
+<svelte:head><title>{$t.searchManageSources} · TorrentsDuck2</title></svelte:head>
 <header class="sources-heading"><a class="quiet-button" href="/search"><Icon name="chevron-left" size={18} />{$t.searchPage}</a><h1>{$t.searchManageSources}</h1><p class="subtitle">{$t.searchSourcesHelp}</p></header>
 <Notification bind:message={error} kind="error" />
 <Notification bind:message={notice} kind="success" />

@@ -38,13 +38,13 @@ async function sendEmail(email: string, subject: string, text: string): Promise<
 }
 
 export async function sendResetEmail(email: string, url: string): Promise<void> {
-  await sendEmail(email, 'Torrents Duck — Réinitialisation du mot de passe', `Pour définir un nouveau mot de passe, ouvre ce lien :\n${url}\n\nSi tu n'as rien demandé, ignore ce message.`);
+  await sendEmail(email, 'TorrentsDuck2 — Réinitialisation du mot de passe', `Pour définir un nouveau mot de passe, ouvre ce lien :\n${url}\n\nSi tu n'as rien demandé, ignore ce message.`);
 }
 
 export async function sendVerificationEmail(email: string, url: string): Promise<void> {
-  await sendEmail(email, 'Torrents Duck — Confirme ton adresse e-mail', `Pour confirmer ton adresse e-mail, ouvre ce lien :\n${url}\n\nSi tu n'as pas créé de compte, ignore ce message.`);
+  await sendEmail(email, 'TorrentsDuck2 — Confirme ton adresse e-mail', `Pour confirmer ton adresse e-mail, ouvre ce lien :\n${url}\n\nSi tu n'as pas créé de compte, ignore ce message.`);
 }
 
 export async function sendRegistrationEmail(email: string, username: string, registeredEmail: string, url: string): Promise<void> {
-  await sendEmail(email, 'Torrents Duck — Nouveau compte à valider', `Un nouveau compte vient de s'inscrire sur Torrents Duck.\n\nPseudo : ${username}\nAdresse e-mail : ${registeredEmail}\n\nPour vérifier et valider ce compte, ouvre l'administration :\n${url}`);
+  await sendEmail(email, 'TorrentsDuck2 — Nouveau compte à valider', `Un nouveau compte vient de s'inscrire sur TorrentsDuck2.\n\nPseudo : ${username}\nAdresse e-mail : ${registeredEmail}\n\nPour vérifier et valider ce compte, ouvre l'administration :\n${url}`);
 }

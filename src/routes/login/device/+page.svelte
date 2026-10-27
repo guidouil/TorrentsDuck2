@@ -35,7 +35,7 @@
   }
 </script>
 
-<svelte:head><title>{$t.deviceApprove} · Torrents Duck</title><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="no-referrer" /></svelte:head>
+<svelte:head><title>{$t.deviceApprove} · TorrentsDuck2</title><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="no-referrer" /></svelte:head>
 <div class="auth-page">
   <section class="auth-card">
     <QuackLogo />

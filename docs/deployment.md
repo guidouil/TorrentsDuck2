@@ -6,7 +6,7 @@ Pour essayer le projet sur votre ordinateur avec Docker, suivre la section [Dock
 
 L’image locale est construite pour `http://127.0.0.1:5180` : ne pas la réutiliser en production. Le déploiement ci-dessous conserve son réseau et son reverse proxy Nginx.
 
-Ce guide installe Torrents Duck 2 sur un hôte **Ubuntu Noble 24.04 LTS amd64 neuf**, avec Docker Engine. Node et PostgreSQL sur l'hôte ne sont pas nécessaires : les services s'exécutent dans des conteneurs. Les domaines, adresses et comptes ci-dessous sont des exemples à remplacer. Aucun script du projet ne réinstalle le système ni ne reformate un disque.
+Ce guide installe TorrentsDuck2 sur un hôte **Ubuntu Noble 24.04 LTS amd64 neuf**, avec Docker Engine. Node et PostgreSQL sur l'hôte ne sont pas nécessaires : les services s'exécutent dans des conteneurs. Les domaines, adresses et comptes ci-dessous sont des exemples à remplacer. Aucun script du projet ne réinstalle le système ni ne reformate un disque.
 
 En cas de remplacement d'une installation Meteor, sauvegarder les comptes et tester leur restauration avant toute intervention ; voir le [guide de migration et sauvegarde](migration-backups.md). Les téléchargements, torrents et messages historiques sont exclus de la migration des comptes.
 
@@ -75,7 +75,7 @@ sudo ufw allow 53/tcp
 sudo ufw allow 53/udp
 ```
 
-Torrents Duck n'exige pas de serveur DNS local. Les ports publiés par Docker peuvent contourner les règles UFW : voir les [limites du filtrage Docker](https://docs.docker.com/engine/install/ubuntu/#firewall-limitations). La politique dédiée de l'étape 5 complète UFW et doit être appliquée avant le démarrage de qBittorrent.
+TorrentsDuck2 n'exige pas de serveur DNS local. Les ports publiés par Docker peuvent contourner les règles UFW : voir les [limites du filtrage Docker](https://docs.docker.com/engine/install/ubuntu/#firewall-limitations). La politique dédiée de l'étape 5 complète UFW et doit être appliquée avant le démarrage de qBittorrent.
 
 ## 4. Cloner et configurer le projet
 

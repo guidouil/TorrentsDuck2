@@ -1,10 +1,10 @@
-# Torrents Duck 2
+# TorrentsDuck2
 
 [English](README.md) · **Français** · [Guide de déploiement](docs/deployment.md) · [Contribuer](#contribuer) · [Apache 2.0](LICENSE)
 
 **Une plateforme open source auto-hébergée pour partager torrents, fichiers et ressources au sein d'une communauté.**
 
-Torrents Duck 2 rassemble les membres autour d'un même serveur, d'un moteur torrent commun et d'une bibliothèque collective. Là où une organisation en seedboxes individuelles répartit le serveur en espaces séparés, le projet mutualise les téléchargements et le stockage : chaque ajout enrichit la bibliothèque de tous les membres approuvés.
+TorrentsDuck2 rassemble les membres autour d'un même serveur, d'un moteur torrent commun et d'une bibliothèque collective. Là où une organisation en seedboxes individuelles répartit le serveur en espaces séparés, le projet mutualise les téléchargements et le stockage : chaque ajout enrichit la bibliothèque de tous les membres approuvés.
 
 L'esprit est celui d'une « cour des miracles » du torrent : un carrefour communautaire où chacun contribue à un espace commun. Les comptes et les permissions encadrent l'accès ; les fichiers et les transferts sont partagés.
 
@@ -51,7 +51,7 @@ npm run local:down  # Arrêter en conservant les données
 npm run local:up    # Reconstruire et redémarrer après une modification du code
 ```
 
-Les données restent dans des volumes nommés dédiés à cette pile locale, y compris après `local:down`. Seul le site publie un port, sur `127.0.0.1:5180` ; PostgreSQL et le RPC qBittorrent restent internes. Le port `5180` et le sous-réseau Docker `172.30.20.0/24` doivent être libres. Une autre pile Torrents Duck ne peut pas utiliser ce sous-réseau en parallèle ; arrêter ses conteneurs sans libérer son réseau ne suffit pas.
+Les données restent dans des volumes nommés dédiés à cette pile locale, y compris après `local:down`. Seul le site publie un port, sur `127.0.0.1:5180` ; PostgreSQL et le RPC qBittorrent restent internes. Le port `5180` et le sous-réseau Docker `172.30.20.0/24` doivent être libres. Une autre pile TorrentsDuck2 ne peut pas utiliser ce sous-réseau en parallèle ; arrêter ses conteneurs sans libérer son réseau ne suffit pas.
 
 Cette configuration utilise des identifiants fictifs pour les essais locaux, sans Nginx, FTPS ni envoi de mails réels. qBittorrent fonctionne sur un réseau interne sans accès aux pairs ni aux indexeurs Internet : les essais du moteur utilisent des torrents de test, des résultats de recherche simulés et des appels API locaux, sans téléchargement public.
 
@@ -104,7 +104,7 @@ Les jauges de transfert utilisent les pics de réception et d’envoi observés 
 
 Node.js 24+, PostgreSQL 17 et une instance qBittorrent sont nécessaires. Copier [.env.example](.env.example) vers `.env`, choisir les secrets, et adapter `DATABASE_URL`, `QBT_URL`, `ORIGIN` et les chemins locaux.
 
-Pour les mails, définir `MAILGUN_API_KEY`, `MAILGUN_DOMAIN` (domaine vérifié dans Mailgun), `MAILGUN_FROM` (par exemple `Torrents Duck <noreply@mg.example.com>`) et `MAILGUN_API_URL` : `https://api.mailgun.net` pour un domaine US ou `https://api.eu.mailgun.net` pour un domaine EU. Les mails de réinitialisation, de confirmation et de notification des inscriptions utilisent l’API Mailgun ; sans clé Mailgun, configurer `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` et `SMTP_FROM` dans `.env`. Chaque inscription avertit les administrateurs actifs et validés, avec un lien vers `/admin` ; en l’absence d’administrateur actif, le mail est envoyé à `ADMIN_EMAIL` si elle est définie. Un échec d’envoi est journalisé sans annuler l’inscription. Garder les clés et mots de passe dans `.env`, jamais dans Git.
+Pour les mails, définir `MAILGUN_API_KEY`, `MAILGUN_DOMAIN` (domaine vérifié dans Mailgun), `MAILGUN_FROM` (par exemple `TorrentsDuck2 <noreply@mg.example.com>`) et `MAILGUN_API_URL` : `https://api.mailgun.net` pour un domaine US ou `https://api.eu.mailgun.net` pour un domaine EU. Les mails de réinitialisation, de confirmation et de notification des inscriptions utilisent l’API Mailgun ; sans clé Mailgun, configurer `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` et `SMTP_FROM` dans `.env`. Chaque inscription avertit les administrateurs actifs et validés, avec un lien vers `/admin` ; en l’absence d’administrateur actif, le mail est envoyé à `ADMIN_EMAIL` si elle est définie. Un échec d’envoi est journalisé sans annuler l’inscription. Garder les clés et mots de passe dans `.env`, jamais dans Git.
 
 Définir `ADMIN_EMAIL=admin@example.com` pour attribuer automatiquement le rôle admin lors de la création de ce compte, sans tenir compte de la casse. Le lien envoyé par mail active ses accès ; la page d’attente permet de renvoyer ce lien en cas d’échec d’envoi ou d’expiration. Les autres comptes restent soumis à la validation d’un administrateur. Une valeur vide désactive cette attribution ; changer la variable ne modifie pas les comptes existants.
 
