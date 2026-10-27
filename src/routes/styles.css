@@ -212,6 +212,7 @@ dialog p { overflow-wrap: anywhere; font-size: 14px; color: var(--muted); line-h
 .chat-name-short { display: none; }
 .chat-entry time { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .chat-entry p { min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-entry p a { color: var(--accent-ink); text-decoration: underline; }
 .chat-form { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
 .chat-compose { flex: 1; min-width: 0; }
 .chat-compose small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }

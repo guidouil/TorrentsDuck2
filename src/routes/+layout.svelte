@@ -13,5 +13,5 @@
   function toggleTheme() { light = !light; localStorage.setItem('theme', light ? 'light' : 'dark'); document.documentElement.dataset.theme = light ? 'light' : 'dark'; }
 </script>
 <Notifications />
-{#if ['/login', '/login/device', '/register', '/reset-password', '/waiting'].includes(page.url.pathname)}<div class="auth-preferences"><button class="quiet-button" onclick={toggleLanguage} aria-label={$t.language}>{$language === 'fr' ? 'FR' : 'EN'}</button><button class="icon-button" onclick={toggleTheme} aria-label={$t.theme}><Icon name={light ? 'moon' : 'sun'} /></button></div>{/if}
+{#if page.error || ['/login', '/login/device', '/register', '/reset-password', '/waiting'].includes(page.url.pathname)}<div class="auth-preferences"><button class="quiet-button" onclick={toggleLanguage} aria-label={$t.language}>{$language === 'fr' ? 'FR' : 'EN'}</button><button class="icon-button" onclick={toggleTheme} aria-label={$t.theme}><Icon name={light ? 'moon' : 'sun'} /></button></div>{/if}
 {@render children()}

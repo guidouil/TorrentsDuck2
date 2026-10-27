@@ -11,6 +11,20 @@
     const characters = Array.from(new Intl.Segmenter().segment(name), ({ segment }) => segment);
     return characters.length > 8 ? characters.slice(0, 7).join('') + '…' : name;
   }
+  function messageParts(text: string): { text: string; href?: string }[] {
+    return text.split(/(\b(?:https?:\/\/|www\.)[^\s<>"'`«»“”‘’]+)/gi).flatMap((part, index) => {
+      if (index % 2 === 0) return [{ text: part }];
+      let link = part.replace(/[.,!?;:]+$/, '');
+      while (/[)\]}]$/.test(link)) {
+        const closing = link.at(-1)!;
+        const opening = { ')': '(', ']': '[', '}': '{' }[closing]!;
+        if (link.split(closing).length <= link.split(opening).length) break;
+        link = link.slice(0, -1).replace(/[.,!?;:]+$/, '');
+      }
+      const href = /^www\./i.test(link) ? `https://${link}` : link;
+      return URL.canParse(href) ? [{ text: link, href }, { text: part.slice(link.length) }] : [{ text: part }];
+    });
+  }
   function keydown(event: KeyboardEvent & { currentTarget: HTMLTextAreaElement }) {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
@@ -33,7 +47,7 @@
       <article class="chat-entry">
         <time datetime={message.createdAt} title={date.toLocaleString($language)} aria-label={date.toLocaleString($language)}>[{date.toLocaleTimeString($language, { hour: '2-digit', minute: '2-digit', hour12: false })}]</time>
         <strong><span class="chat-name-full" aria-hidden="true">&lt;{message.name}&gt;</span><span class="chat-name-short" aria-hidden="true">&lt;{shortName(message.name)}&gt;</span><span class="sr-only">&lt;{message.name}&gt;</span></strong>
-        <p>{message.body}</p>
+        <p>{#each messageParts(message.body) as part, partIndex (partIndex)}{#if part.href}<a href={part.href} target="_blank" rel="noopener noreferrer">{part.text}</a>{:else}{part.text}{/if}{/each}</p>
       </article>
     {/each}
   </div>

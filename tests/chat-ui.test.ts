@@ -1,5 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { compile } from 'svelte/compiler';
+// @ts-expect-error Compiled SSR output uses this runtime, which has no public declarations.
+import * as server from 'svelte/internal/server';
+import { render } from 'svelte/server';
 import { transpile } from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -7,10 +11,10 @@ function mountChat(api = vi.fn().mockResolvedValue({ messages: [], nextCursor: n
   const script = readFileSync(new URL('../src/routes/(app)/chat/+page.svelte', import.meta.url), 'utf8')
     .split('<script lang="ts">')[1].split('</script>')[0].replace(/^\s*import .+;\s*$/gm, '');
   const context: Record<string, any> = {
-    api, onMount: vi.fn(), tick: vi.fn().mockResolvedValue(undefined),
+    api, URL, onMount: vi.fn(), tick: vi.fn().mockResolvedValue(undefined),
     $state: (value: unknown) => value
   };
-  runInNewContext(transpile(`${script}\nglobalThis.chat = { keydown, send, shortName, input: (value) => { body = value; }, state: () => ({ body, busy, error, messages }) };`), context);
+  runInNewContext(transpile(`${script}\nglobalThis.chat = { keydown, send, shortName, messageParts, input: (value) => { body = value; }, state: () => ({ body, busy, error, messages }) };`), context);
   return { api, event: { preventDefault: vi.fn() }, ...context.chat };
 }
 
@@ -20,6 +24,53 @@ function keyEvent(overrides = {}) {
     preventDefault: vi.fn(), currentTarget: { form: { requestSubmit: vi.fn() } }, ...overrides
   };
 }
+
+describe('chat links', () => {
+  it('renders escaped message content and links that open safely in a new tab', () => {
+    const component = readFileSync(new URL('../src/routes/(app)/chat/+page.svelte', import.meta.url), 'utf8');
+    const markup = component.match(/<p>\{#each messageParts\(message.body\)[\s\S]*?<\/p>/)![0];
+    const compiled = compile(`<script>let { message, messageParts } = $props();</script>${markup}`, { generate: 'server', filename: 'Message.svelte' }).js.code
+      .replace(/^import .+;\s*$/gm, '').replace('export default function', 'function');
+    const Message = runInNewContext(`${compiled}\nMessage;`, { $: server });
+    const { body } = render(Message, { props: {
+      message: { body: '<img src=x onerror=alert(1)> https://example.com/?a=1&b=2' },
+      messageParts: mountChat().messageParts
+    } });
+    expect(body).toContain('&lt;img src=x onerror=alert(1)>');
+    expect(body).not.toContain('<img');
+    expect(body).toContain('<a href="https://example.com/?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">https://example.com/?a=1&amp;b=2</a>');
+  });
+
+  it('recognizes web links while preserving all text and line breaks', () => {
+    const body = 'Voir https://example.com/search?q=duck&lang=fr,\nhttp://example.org et WWW.example.net/docs#intro.';
+    const parts = mountChat().messageParts(body);
+    expect(parts.filter((part: any) => part.href)).toEqual([
+      { text: 'https://example.com/search?q=duck&lang=fr', href: 'https://example.com/search?q=duck&lang=fr' },
+      { text: 'http://example.org', href: 'http://example.org' },
+      { text: 'WWW.example.net/docs#intro', href: 'https://WWW.example.net/docs#intro' }
+    ]);
+    expect(parts.map((part: any) => part.text).join('')).toBe(body);
+  });
+
+  it.each([
+    ['(https://example.com/page).', 'https://example.com/page'],
+    ['[https://example.com/page]!', 'https://example.com/page'],
+    ['https://example.com/wiki/Duck_(bird)', 'https://example.com/wiki/Duck_(bird)'],
+    ['(https://example.com/wiki/Duck_(bird)).', 'https://example.com/wiki/Duck_(bird)'],
+    ['<https://example.com>', 'https://example.com'],
+    ['«https://example.org»', 'https://example.org']
+  ])('handles punctuation around %s', (body, expected) => {
+    const parts = mountChat().messageParts(body);
+    expect(parts.find((part: any) => part.href)?.href).toBe(expected);
+    expect(parts.map((part: any) => part.text).join('')).toBe(body);
+  });
+
+  it.each(['', 'Texte simple\nDeuxième ligne', 'javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'http:// https:// www. https://[invalid]', '<img src=x onerror=alert(1)>'])('leaves invalid URLs and unsafe content as text: %s', (body) => {
+    const parts = mountChat().messageParts(body);
+    expect(parts.some((part: any) => part.href)).toBe(false);
+    expect(parts.map((part: any) => part.text).join('')).toBe(body);
+  });
+});
 
 describe('chat mobile names', () => {
   it.each([
