@@ -24,11 +24,11 @@ function mount() {
     $state: (value: unknown) => value,
     onMount: (callback: () => () => void) => { cleanup = callback(); }
   };
-  runInNewContext(transpile(`${script}\nglobalThis.egg = { keydown, message: () => message };`), context);
+  runInNewContext(transpile(`${script}\nglobalThis.egg = { keydown, dismiss, message: () => message, matrix: () => matrix };`), context);
   const preventDefault = vi.fn();
   const key = (key: string, overrides = {}) => context.egg.keydown({ key, target: new Element(), preventDefault, ...overrides });
   return {
-    key, preventDefault, message: context.egg.message, cleanup: () => cleanup(),
+    key, preventDefault, message: context.egg.message, matrix: context.egg.matrix, dismiss: context.egg.dismiss, cleanup: () => cleanup(),
     press: (keys: string | string[]) => { for (const value of keys) key(value); }
   };
 }
@@ -61,11 +61,13 @@ describe('discreet keyboard easter eggs', () => {
 
   it.each(['defaultPrevented', 'repeat', 'isComposing', 'ctrlKey', 'altKey', 'metaKey'])('ignores %s events and resets a pending code', (flag) => {
     const egg = mount();
-    egg.press('iddq');
-    egg.key('d', { [flag]: true });
-    expect(egg.message()).toBe('');
-    egg.press('d');
-    expect(egg.message()).toBe('');
+    for (const code of ['iddqd', 'matrix']) {
+      egg.press(code.slice(0, -1));
+      egg.key(code.at(-1)!, { [flag]: true });
+      egg.press(code.at(-1)!);
+      expect(egg.message()).toBe('');
+      expect(egg.matrix()).toBe(false);
+    }
     egg.press('iddqd');
     expect(egg.message()).toBe('Doom found');
   });
@@ -80,11 +82,13 @@ describe('discreet keyboard easter eggs', () => {
     ['native dialog', new Element('span', new Element('dialog'))]
   ])('leaves %s alone and resets a pending code', (_, target) => {
     const egg = mount();
-    egg.press('iddq');
-    egg.key('d', { target });
-    expect(egg.message()).toBe('');
-    egg.press('d');
-    expect(egg.message()).toBe('');
+    for (const code of ['iddqd', 'matrix']) {
+      egg.press(code.slice(0, -1));
+      egg.key(code.at(-1)!, { target });
+      egg.press(code.at(-1)!);
+      expect(egg.message()).toBe('');
+      expect(egg.matrix()).toBe(false);
+    }
     egg.press('iddqd');
     expect(egg.message()).toBe('Doom found');
   });
@@ -102,11 +106,67 @@ describe('discreet keyboard easter eggs', () => {
     expect(egg.message()).toBe('');
   });
 
-  it('cancels its timer when unmounted', () => {
+  it.each(['iddqd', 'matrix'])('cancels the %s timer when unmounted', (code) => {
     const egg = mount();
-    egg.press('iddqd');
+    egg.press(code);
     expect(vi.getTimerCount()).toBe(1);
     egg.cleanup();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('Matrix easter egg', () => {
+  it.each(['matrix', 'MATRIX'])('activates the effect with %s without consuming keys', (code) => {
+    const egg = mount();
+    egg.press(code);
+    expect(egg.matrix()).toBe(true);
+    expect(egg.message()).toBe('');
+    expect(egg.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('stays visible for 6500 ms and renews its single timer on another activation', () => {
+    const egg = mount();
+    egg.press('matrix');
+    vi.advanceTimersByTime(6499);
+    expect(egg.matrix()).toBe(true);
+    egg.press('matrix');
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(6499);
+    expect(egg.matrix()).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(egg.matrix()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['Escape', 'close'])('dismisses immediately with %s and clears the timer', (action) => {
+    const egg = mount();
+    egg.press('matrix');
+    if (action === 'Escape') egg.key('Escape', { target: new Element('input') });
+    else egg.dismiss();
+    expect(egg.matrix()).toBe(false);
+    expect(egg.message()).toBe('');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('replaces a notification and yields to another easter egg', () => {
+    const egg = mount();
+    egg.press('iddqd');
+    egg.press('matrix');
+    expect(egg.matrix()).toBe(true);
+    expect(egg.message()).toBe('');
+    egg.press(konami);
+    expect(egg.matrix()).toBe(false);
+    expect(egg.message()).toBe('Konami found');
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('keeps a pending code when a previous notification expires', () => {
+    const egg = mount();
+    egg.press('iddqd');
+    vi.advanceTimersByTime(4199);
+    egg.press('mat');
+    vi.advanceTimersByTime(1);
+    egg.press('rix');
+    expect(egg.matrix()).toBe(true);
   });
 });
