@@ -36,13 +36,28 @@
     duck: "M3 12c3 1 6 1 8-1V7a4 4 0 0 1 8 0l3 2-4 2v2c0 5-4 8-9 8-4 0-7-3-7-6l1-3ZM15.5 6.5h.01M8 16c2 1 4 1 6-1"
   };
   export type IconName = keyof typeof paths;
+  const ascii: Record<IconName, string> = {
+    search: '[?]', language: 'Aa', transfer: '<>', files: '[/]', chat: '[.]', settings: '[*]',
+    sun: '(*)', moon: '(c)', user: '@', logout: '->', plus: '+', download: 'v', upload: '^',
+    library: '[=]', disk: '[#]', file: '[ ]', 'video-file': '[>]', 'audio-file': '[~]', folder: '[/]',
+    play: '>', pause: '||', share: '&', edit: '/', trash: '[x]', x: 'x', 'minus-circle': '(-)',
+    'chevron-left': '<', 'chevron-right': '>', check: '[v]', send: '->', cone: '/!\\', duck: '<o)'
+  };
 </script>
 
 <script lang="ts">
+  import { skin } from '#lib/theme.js';
   let { name, size = 20 }: { name: IconName; size?: number } = $props();
 </script>
 
-{#if name === 'duck'}
+{#if $skin === 'ascii'}
+  <span class="ascii-icon" style:width={`${size}px`} style:height={`${size}px`} style:font-size={`${Math.max(10, size * .55)}px`} aria-hidden="true">{ascii[name]}</span>
+{:else if name === 'duck' && $skin === '8bit'}
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true" focusable="false">
+    <path d="M8 2h5v1h1v3h2v2h-3v4h-1v1h-2v1H4v-1H2v-1H1V8h2v1h4V8h1V2Z" />
+    <path d="M11 4h1v1h-1Z" fill="var(--primary-container)" />
+  </svg>
+{:else if name === 'duck'}
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
     <path d={paths.duck} />
   </svg>
@@ -57,4 +72,5 @@
 
 <style>
   svg { display: inline-block; vertical-align: middle; flex-shrink: 0; }
+  .ascii-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 700; line-height: 1; white-space: nowrap; }
 </style>

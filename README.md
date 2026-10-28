@@ -61,6 +61,8 @@ This configuration uses fictional credentials for local testing, without Nginx, 
 
 Registration is open. Each new account stays on a waiting page, without service access, until an administrator approves it. The address configured in `ADMIN_EMAIL` automatically receives the administrator role when registering; access is activated after email verification.
 
+Under **My account → Appearance**, choose Original Duck, ASCII, 8-bit or Corporate. The choice applies immediately and is saved in the current browser. The sun/moon button switches light and dark mode for every theme.
+
 ### TV sign-in
 
 To connect a TV without entering a password on it, choose “Sign in with my phone” on the sign-in page. Scan the QR code, sign in on the phone if needed, compare the code on both screens, then approve the connection. The QR code expires after five minutes and can only be used once. Only approve requests started on your own device. Signing out on one device closes all web sessions for the account, including the TV, and cancels approved QR codes that have not yet been used. Open screens detect the sign-out within a few seconds when their network connection is available. Both devices must be able to reach the same site address, using HTTPS in production.
