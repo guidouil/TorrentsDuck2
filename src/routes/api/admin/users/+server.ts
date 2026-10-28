@@ -9,6 +9,22 @@ export const GET: RequestHandler = async (event) => {
   return json({ users });
 };
 
+export const DELETE: RequestHandler = async (event) => {
+  const admin = await requireAdmin(event);
+  const body = await readJsonObject(event.request);
+  if (body.confirm !== true) error(400, 'Explicit pending account deletion confirmation required');
+  const deleted = await transaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(782411)');
+    const { rowCount } = await client.query(`WITH deleted AS (
+      DELETE FROM "user" WHERE approved=false AND id<>$1 RETURNING id,username
+    )
+    INSERT INTO audit_log(user_id,action,target,details)
+    SELECT $1,'user.delete',id,jsonb_build_object('username',username) FROM deleted`, [admin.id]);
+    return rowCount;
+  });
+  return json({ deleted });
+};
+
 export const POST: RequestHandler = async (event) => {
   const admin = await requireAdmin(event);
   const body = await readJsonObject(event.request);

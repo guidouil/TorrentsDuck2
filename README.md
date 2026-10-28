@@ -91,6 +91,10 @@ For email, set `MAILGUN_API_KEY`, `MAILGUN_DOMAIN` (a verified Mailgun domain), 
 
 Set `ADMIN_EMAIL=admin@example.com` to automatically assign the admin role when that account is created, using a case-insensitive address match. The emailed verification link activates access; the waiting page can resend it if delivery fails or the link expires. Other accounts still require administrator approval. An empty value disables automatic assignment; changing the variable does not modify existing accounts.
 
+In Administration, the **Pending** tab lists unapproved accounts with their email addresses and an **Approve** action. Approval does not require email verification, so a fictitious address is accepted; that address cannot receive password reset emails. Approved accounts appear in **Members**.
+
+**Delete all** permanently removes all accounts awaiting administrator approval after explicit confirmation, including those hidden by the search. Approved accounts are preserved even if their email address is unverified. Sessions and playback links belonging to deleted accounts are removed; shared files, transfers and messages are preserved.
+
 ```sh
 npm ci
 node --env-file=.env --run db:migrate

@@ -24,7 +24,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
   const origin = 'http://localhost:5173';
   const configuredAdminEmail = `${prefix}+bootstrap@example.org`;
   const previousAdminEmail = process.env.ADMIN_EMAIL;
-  const registeredUsernames = [`${prefix}-public`, `${prefix}-bootstrap`, `${prefix}-mail-failed`];
+  const bulkUsernames = [`${prefix}-bulk-unverified`, `${prefix}-bulk-verified`];
+  const bulkHash = createHash('sha256').update(`${prefix}-bulk`).digest('hex').slice(0, 40);
+  const registeredUsernames = [`${prefix}-public`, `${prefix}-bootstrap`, `${prefix}-mail-failed`, ...bulkUsernames];
   let cookie = '';
   let adminCookie = '';
   let pendingId = '';
@@ -108,8 +110,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     try {
       if (schemaReady) {
         await db.query('DELETE FROM "deviceCode" WHERE "deviceCode"=ANY($1::text[])', [deviceCodes]);
-        await db.query('DELETE FROM messages WHERE body=$1', [prefix]);
-        await db.query('DELETE FROM torrent_authors WHERE hash=$1', [createHash('sha256').update(prefix).digest('hex').slice(0, 40)]);
+        await db.query('DELETE FROM messages WHERE body=ANY($1::text[])', [[prefix, ...bulkUsernames]]);
+        await db.query('DELETE FROM torrent_authors WHERE hash=ANY($1::text[])', [[createHash('sha256').update(prefix).digest('hex').slice(0, 40), bulkHash]]);
         await db.query('DELETE FROM audit_log WHERE user_id IN (SELECT id FROM "user" WHERE id=ANY($1::text[]) OR username=ANY($2::text[]))', [[adminId, memberId, ftpId], registeredUsernames]);
         await db.query('DELETE FROM "user" WHERE id=ANY($1::text[]) OR username=ANY($2::text[])', [[adminId, memberId, ftpId], registeredUsernames]);
       }
@@ -511,6 +513,39 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     const self = event('/api/admin/users/[id]', { confirm: true }, adminCookie);
     self.params.id = adminId;
     await expect(deleteRoute.DELETE(self)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('deletes all unapproved accounts with their private access, audits each deletion and preserves approved accounts and shared content', async () => {
+    const policyRoute = await import('../src/routes/api/internal/ftp-policy/+server');
+    const before = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
+    for (const [index, id] of bulkUsernames.entries()) {
+      await db.query('INSERT INTO "user"(id,name,username,email,enabled,approved,"emailVerified") VALUES ($1,$1,$1,$2,$3,false,$4)', [id, `${id}@example.invalid`, index === 0, index === 1]);
+      await db.query('INSERT INTO account(id,"accountId","providerId","userId") VALUES ($1,$1,\'credential\',$1)', [id]);
+      await db.query('INSERT INTO session(id,token,"userId","expiresAt") VALUES ($1,$1,$1,now()+interval \'1 day\')', [id]);
+      await db.query('INSERT INTO "deviceCode"(id,"deviceCode","userCode","userId","expiresAt",status) VALUES ($1,$1,$1,$1,now()+interval \'1 day\',\'pending\')', [id]);
+      await db.query('INSERT INTO playback_tokens(token_hash,user_id,space,path,expires_at) VALUES ($1,$2,\'share\',\'test.mp4\',now()+interval \'1 day\')', [createHash('sha256').update(id).digest('hex'), id]);
+    }
+    await db.query('INSERT INTO messages(user_id,body) VALUES ($1,$1)', [bulkUsernames[0]]);
+    await db.query('INSERT INTO torrent_authors(hash,user_id) VALUES ($1,$2)', [bulkHash, bulkUsernames[0]]);
+    const { rows: waiting } = await db.query('SELECT id,username FROM "user" WHERE approved=false ORDER BY id');
+
+    const response = await adminRoutes.DELETE(event('/api/admin/users', { confirm: true }, adminCookie));
+
+    expect(await response.json()).toEqual({ deleted: waiting.length });
+    expect((await db.query('SELECT id FROM "user" WHERE approved=false')).rows).toEqual([]);
+    expect((await db.query('SELECT id,approved,"emailVerified" FROM "user" WHERE id=ANY($1::text[]) ORDER BY id', [[adminId, memberId]])).rows).toEqual([
+      { id: adminId, approved: true, emailVerified: false }, { id: memberId, approved: true, emailVerified: false }
+    ]);
+    for (const table of ['account', 'session', '"deviceCode"']) {
+      expect((await db.query(`SELECT id FROM ${table} WHERE "userId"=ANY($1::text[])`, [bulkUsernames])).rows).toEqual([]);
+    }
+    expect((await db.query('SELECT id FROM playback_tokens WHERE user_id=ANY($1::text[])', [bulkUsernames])).rows).toEqual([]);
+    expect((await db.query('SELECT user_id FROM messages WHERE body=$1', [bulkUsernames[0]])).rows).toEqual([{ user_id: null }]);
+    expect((await db.query('SELECT user_id FROM torrent_authors WHERE hash=$1', [bulkHash])).rows).toEqual([{ user_id: null }]);
+    expect((await db.query('SELECT user_id,target,details FROM audit_log WHERE action=\'user.delete\' AND target=ANY($1::text[]) ORDER BY target', [waiting.map(({ id }) => id)])).rows).toEqual(waiting.map(({ id, username }) => ({ user_id: adminId, target: id, details: { username } })));
+    const after = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
+    expect(BigInt(after.revision)).toBeGreaterThan(BigInt(before.revision));
+    expect(await (await adminRoutes.DELETE(event('/api/admin/users', { confirm: true }, adminCookie))).json()).toEqual({ deleted: 0 });
   });
 
   it('rejects incomplete production authentication configuration before serving', () => {

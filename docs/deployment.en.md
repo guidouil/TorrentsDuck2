@@ -152,6 +152,10 @@ The first command reads `ACME_EMAIL` from `.env` through Compose. To override it
 
 On a fresh installation, sign up on the site using the address configured in `ADMIN_EMAIL`, then follow the email verification link to activate the administrator. The waiting page can resend this link. Other accounts wait for administrator approval. Changing `ADMIN_EMAIL` later does not change existing accounts. A registration notifies active, approved administrators; if none exist, `ADMIN_EMAIL` receives the notification when configured. Sending failures are logged and do not cancel registration.
 
+In Administration, the **Pending** tab lists unapproved accounts with their email addresses and an **Approve** action. Approval does not require email verification, including for a fictitious address; that address cannot receive password reset emails. Approved accounts appear in **Members**.
+
+**Delete all** permanently removes all accounts awaiting administrator approval after explicit confirmation, including those hidden by the search. Approved accounts are preserved even if their email address is unverified. Sessions and playback links belonging to deleted accounts are removed; shared files, transfers and messages are preserved.
+
 ## 8. Check the installation
 
 ```sh

@@ -6,12 +6,25 @@
   import Modal from '#lib/Modal.svelte';
   let { data } = $props();
   let users = $state<any[]>([]); let backup = $state<any>(null); let error = $state(''); let busy = $state(false); let loading = $state(true); let query = $state('');
+  let tab = $state<'members' | 'pending'>('members');
   type UserChange = { user: any; approved?: boolean; enabled?: boolean; role?: string; canManageSources?: boolean; delete?: boolean };
   let changeOpen = $state(false); let change = $state<UserChange | null>(null);
-  const filtered = $derived(users.filter((u) => `${u.username} ${u.email}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())));
+  let deletePendingOpen = $state(false);
+  const pendingCount = $derived(users.filter((u) => !u.approved).length);
+  const filtered = $derived(users.filter((u) => (tab === 'pending' ? !u.approved : u.approved) && `${u.username} ${u.email}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())));
   async function load() { try { const [members, backups] = await Promise.all([api('/api/admin/users'), api('/api/admin/backup')]); users = members.users; backup = backups.backup; } catch (e) { error = (e as Error).message; } finally { loading = false; } }
   onMount(() => { void load(); });
   function ask(user: any, update: Omit<UserChange, 'user'>) { error = ''; change = { user, ...update }; changeOpen = true; }
+  function askDeletePending() { error = ''; deletePendingOpen = true; }
+  async function deletePendingUsers() {
+    if (busy) return;
+    busy = true; error = '';
+    try {
+      await api('/api/admin/users', { method: 'DELETE', body: JSON.stringify({ confirm: true }) });
+      deletePendingOpen = false;
+      await load();
+    } catch (e) { error = (e as Error).message; } finally { busy = false; }
+  }
   async function updateUser(update = change) { if (!update) return; busy = true; error = ''; try { if (update.delete) { await api(`/api/admin/users/${encodeURIComponent(update.user.id)}`, { method: 'DELETE', body: JSON.stringify({ confirm: true }) }); } else { await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ id: update.user.id, ...(update.approved !== undefined ? { approved: update.approved } : {}), ...(update.enabled !== undefined ? { enabled: update.enabled } : {}), ...(update.role ? { role: update.role } : {}), ...(update.canManageSources !== undefined ? { canManageSources: update.canManageSources } : {}) }) }); } changeOpen = false; await load(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
 </script>
 <svelte:head><title>{$t.admin} · TorrentsDuck2</title></svelte:head>
@@ -29,16 +42,21 @@
   {/if}
   <p class="subtitle backup-help">{$t.backupHelp}</p>
 </section>
-<section class="panel" aria-label={$t.members} aria-busy={loading}>
+<section class="panel" aria-label={tab === 'pending' ? $t.pending : $t.members} aria-busy={loading}>
   <div class="toolbar">
-    <input class="search" type="search" placeholder={$t.search} aria-label={$t.search} bind:value={query} />
+    <div class="tabs" role="group" aria-label={$t.admin}>
+      <button class={{ selected: tab === 'members' }} aria-pressed={tab === 'members'} onclick={() => { tab = 'members'; }}>{$t.members} ({users.length - pendingCount})</button>
+      <button class={{ selected: tab === 'pending' }} aria-pressed={tab === 'pending'} onclick={() => { tab = 'pending'; }}>{$t.pending} ({pendingCount})</button>
+    </div>
     <div class="spacer"></div>
-    <span class="badge">{users.length} {$t.members.toLocaleLowerCase()}</span>
+    <input class="search" type="search" placeholder={$t.search} aria-label={$t.search} bind:value={query} />
+    {#if tab === 'pending'}<button class="secondary danger" disabled={loading || busy || !pendingCount} onclick={askDeletePending}>{$t.deleteAll}</button>{/if}
   </div>
+  {#if tab === 'pending'}<p class="subtitle pending-help">{$t.pendingAccountsHelp}</p>{/if}
   {#if loading}
     <div class="empty"><p>{$t.loadingPage}</p></div>
   {:else if !filtered.length}
-    <div class="empty" role="status"><p>{$t.noResults}</p></div>
+    <div class="empty" role="status"><p>{tab === 'pending' && !pendingCount ? $t.noPendingAccounts : $t.noResults}</p></div>
   {:else}
     <div class="table-wrap members-wrap">
       <!-- Preserve table semantics in Safari when mobile CSS changes display. -->
@@ -72,10 +90,20 @@
   {/if}
 </section>
 <Modal bind:open={changeOpen} title={change?.delete ? $t.deleteAccount : $t.changePermissions}>{#if change}<p>{change.delete ? $t.confirmDeleteAccount : $t.confirmPermissions} <strong>{change.user.username}</strong> ?</p>{#if change.delete}<p>{$t.deleteAccountHelp}</p>{:else if change.enabled === false}<p>{$t.revokeWeb}</p>{/if}{#if change.canManageSources !== undefined}<p>{$t.sourceManagementHelp}</p>{/if}{#if change.delete || change.enabled === false}<p>{$t.ftpsDisconnect}</p>{/if}<div class="dialog-actions"><button class="secondary" onclick={() => { changeOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: change.delete || change.enabled === false }]} disabled={busy} onclick={() => updateUser()}>{change.delete ? $t.deletePermanently : $t.confirm}</button></div>{/if}</Modal>
+<Modal bind:open={deletePendingOpen} title={$t.deletePendingAccounts}>
+  <p>{$t.confirmDeletePendingAccounts.replace('{count}', String(pendingCount))}</p>
+  <p>{$t.deletePendingAccountsHelp}</p>
+  <p>{$t.ftpsDisconnect}</p>
+  <div class="dialog-actions">
+    <button class="secondary" disabled={busy} onclick={() => { deletePendingOpen = false; }}>{$t.cancel}</button>
+    <button class="primary destructive" disabled={busy || !pendingCount} onclick={deletePendingUsers}>{$t.deletePermanently}</button>
+  </div>
+</Modal>
 
 <style>
   .backup-card{margin-bottom:16px}
   .backup-help{margin-top:16px}
+  .pending-help{margin:16px}
   .members-table{table-layout:fixed}
   .members-table th,.members-table td{padding:8px 12px}
   .members-table th:nth-child(1){width:15%}
@@ -106,6 +134,9 @@
     .row-actions button{min-height:44px;padding:10px 14px;text-align:center;font-size:13px;overflow-wrap:anywhere}
   }
   @media(max-width:700px){
+    .tabs{width:100%}
+    .tabs button{flex:1;min-width:0;padding:8px}
+    .pending-help{margin:16px 0}
     .members-wrap{padding:0}
     .members-table tbody{gap:0}
     .members-table tbody tr{padding:12px 0;background:transparent;border-bottom:1px solid var(--line);border-radius:0}

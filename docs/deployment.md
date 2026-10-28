@@ -152,6 +152,10 @@ La première commande lit `ACME_EMAIL` depuis `.env` via Compose. Pour remplacer
 
 Pour une installation neuve, s'inscrire sur le site avec l'adresse configurée dans `ADMIN_EMAIL`, puis suivre le lien de confirmation reçu par mail pour activer l'administrateur. La page d'attente permet de renvoyer ce lien. Les autres comptes attendent la validation d'un administrateur. Modifier `ADMIN_EMAIL` ensuite ne change pas les comptes existants. Une inscription prévient les administrateurs actifs et validés ; à défaut, `ADMIN_EMAIL` reçoit la notification si elle est définie. Un échec d'envoi est journalisé et n'annule pas l'inscription.
 
+Dans Administration, l'onglet **En attente** affiche les comptes à valider, leurs adresses e-mail et le bouton **Valider**. La validation est possible sans adresse e-mail vérifiée, y compris avec une adresse fictive ; celle-ci ne permettra pas de recevoir les e-mails de réinitialisation du mot de passe. Les comptes validés apparaissent dans **Membres**.
+
+Le bouton **Tout supprimer** efface définitivement tous les comptes en attente d'approbation après confirmation explicite, y compris ceux masqués par la recherche. Les comptes approuvés sont conservés, même si leur adresse e-mail n'est pas vérifiée. Les sessions et liens de lecture des comptes supprimés sont effacés ; les fichiers, transferts et messages partagés sont conservés.
+
 ## 8. Vérifier l'installation
 
 ```sh
