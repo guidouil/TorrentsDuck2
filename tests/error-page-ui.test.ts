@@ -24,6 +24,15 @@ function renderPage(status: number) {
 afterEach(() => language.set('fr'));
 
 describe('error page', () => {
+  it.each([
+    ['page', component],
+    ['fallback', readFileSync(new URL('../src/error.html', import.meta.url), 'utf8')]
+  ])('keeps the back of the water behind the duck and its front in front in the %s', (_name, source) => {
+    const duck = source.indexOf('<g class="duck">');
+    expect(source.indexOf('d="M14 141a66 13 0 0 1 132 0"')).toBeLessThan(duck);
+    expect(source.indexOf('d="M14 141a66 13 0 0 0 132 0"')).toBeGreaterThan(duck);
+  });
+
   it.each(['fr', 'en'] as const)('renders the duck 404 and a way home in %s', (locale) => {
     language.set(locale);
     const labels = get(t);
@@ -38,9 +47,30 @@ describe('error page', () => {
     expect(body).not.toContain(internalMessage);
   });
 
-  it.each([
-    ['fr', 403], ['fr', 500], ['en', 500]
-  ] as const)('renders a generic error in %s for status %i', (locale, status) => {
+  it.each((['fr', 'en'] as const).flatMap((locale) =>
+    Object.keys(get(t).errorPages).map((status) => [locale, Number(status)] as const)
+  ))('renders the duck and status-specific copy in %s for status %i', (locale, status) => {
+    language.set(locale);
+    const labels = get(t);
+    const message = labels.errorPages[status as keyof typeof labels.errorPages];
+    const { body, head } = renderPage(status);
+    expect(head).toContain(`${status} · ${message.title}`);
+    expect(body).toContain(message.title);
+    expect(body).toContain(message.description);
+    expect(body).toContain(`TorrentsDuck2 · ${status}`);
+    const digits = [...body.matchAll(/<span[^>]*aria-hidden="true"[^>]*>(\d)<\/span>/g)].map((match) => match[1]).join('');
+    expect(digits).toBe(String(status));
+    expect(body).toContain(`aria-label="${labels.quack}"`);
+    expect(body).toContain('src="/quack.mp3"');
+    expect(body).toMatch(/href="\/"/);
+    expect(body).toContain(labels.backHome);
+    expect(body).not.toContain(internalMessage);
+    expect(head).toContain('noindex,nofollow');
+  });
+
+  it.each((['fr', 'en'] as const).flatMap((locale) =>
+    [418, 499, 501, 599].map((status) => [locale, status] as const)
+  ))('keeps the duck and safe generic copy in %s for unknown status %i', (locale, status) => {
     language.set(locale);
     const labels = get(t);
     const { body, head } = renderPage(status);
@@ -51,6 +81,7 @@ describe('error page', () => {
     expect(body).not.toContain(labels.notFoundTitle);
     expect(body).not.toContain(internalMessage);
     expect(body).toContain(labels.backHome);
+    expect(body).toContain(`aria-label="${labels.quack}"`);
   });
 
   it.each([false, true])('restarts the duck sound and handles unavailable audio: %s', async (unavailable) => {
