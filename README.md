@@ -74,7 +74,7 @@ In the file browser, “Open in VLC” prepares a revocable playback link valid 
 
 ### Duck Studio
 
-Open **Studio**, or choose **Create a clip** in the library. A project assembles passages from one or several existing videos on a single track, up to five minutes in total. Choose 16:9 or 9:16, adjust each crop, select the original audio track and add a title. Import an SRT and edit its text and timecodes on the final montage timeline; subtitles are burned into the exported image.
+Open **Studio**, or choose **Create a clip** in the library. Follow the three sections: add videos, choose passages, then export. A project assembles passages from one or several existing videos on a single track, up to five minutes in total. Browse the entire source with the seek slider or the ±10-second buttons, then mark the start and end of each passage. **Play clip** previews only the selected passage. Choose 16:9 or 9:16; collapsible sections hold optional audio, crop and title settings, thumbnails and SRT subtitles. Imported subtitles use the final montage timeline and are burned into the exported image.
 
 Projects, previews and exports are private. Download the H.264/AAC MP4 in 1080p, or explicitly share a finished copy with the community: the published file belongs to `share`, with its existing collective permissions. Sources remain unchanged. Unsupported browser formats can use a low-resolution preview of the selected passages, prepared on demand.
 

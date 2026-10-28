@@ -23,11 +23,14 @@ function editor(api = vi.fn()) {
     $state: (value: unknown) => value, $derived: derived, $t: get(t)
   };
   const script = source.split('<script lang="ts">')[1].split('</script>')[0].replace(/^\s*import .+;\s*$/gm, '')
+    .replace('const selected = $derived(project?.clips[selectedIndex]);', "Object.defineProperty(globalThis, 'selected', { get: () => project?.clips[selectedIndex] });")
     .replace('const total = $derived(project ? studioDuration(project.clips) : 0);', "Object.defineProperty(globalThis, 'total', { get: () => project ? studioDuration(project.clips) : 0 });");
   runInNewContext(transpile(`${script}\nglobalThis.editor = {
     refresh, addMedia, moveClip, removeClip, createJob, importSrt, cancelJob, isVideo,
+    fileUrl, timecode, seek, playClip, updatePlayback, finishSeeking, selectClip, setBoundary,
     setup: (value, tasks = []) => { project = value; jobs = tasks; baseline = JSON.stringify(edit(value)); },
-    state: () => ({ project, jobs, selectedIndex, error, busy })
+    playback: (element, length = 600) => { video = element; sourceDuration = length; playhead = element.currentTime; },
+    state: () => ({ project, jobs, selectedIndex, error, busy, previewingClip, selectedJob })
   };`), context);
   context.editor.setup(structuredClone(project));
   return { api, ...context.editor };
@@ -75,6 +78,7 @@ describe('studio editing', () => {
     expect(api.mock.calls[0][0]).toBe('/api/studio/project');
     expect(api.mock.calls[0][1].method).toBe('PATCH');
     expect(api.mock.calls[1]).toEqual(['/api/studio/project/jobs', { method: 'POST', body: JSON.stringify({ kind: 'export' }) }]);
+    expect(ui.state().selectedJob).toBe('render');
     api.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ project, jobs: [] });
     await ui.cancelJob({ id: 'render' });
     expect(api).toHaveBeenNthCalledWith(3, '/api/studio/project/jobs/render', { method: 'DELETE', body: '{}' });
@@ -110,6 +114,98 @@ describe('studio editing', () => {
     expect(rejectedInput.value).toBe('');
     expect(ui.state().project.subtitles).toBe(valid);
     expect(ui.state().error).toBe(get(t).studio.srtInvalid);
+  });
+});
+
+describe('studio source playback', () => {
+  const player = (currentTime = 0) => ({ currentTime, seeking: false, pause: vi.fn(), play: vi.fn().mockResolvedValue(undefined) });
+
+  it('keeps the source URL stable when trim, crop, title or audio changes', () => {
+    const ui = editor();
+    const original = ui.fileUrl(clip);
+    const changed = ui.fileUrl({ ...clip, start: 150, end: 180, x: 0.2, y: 0.8, title: 'New title', audio: null });
+    expect(changed).toBe(original);
+    expect([...new URL(changed, 'https://example.test').searchParams.keys()]).toEqual(['space', 'path', 'inline']);
+  });
+
+  it('allows playback beyond the selected excerpt and stops only an explicit clip preview', () => {
+    const ui = editor(), video = player(150);
+    ui.playback(video);
+    ui.updatePlayback();
+    expect(video.currentTime).toBe(150);
+    expect(video.pause).not.toHaveBeenCalled();
+    ui.playClip();
+    expect(video.currentTime).toBe(clip.start);
+    expect(video.play).toHaveBeenCalledOnce();
+    video.currentTime = clip.end;
+    ui.updatePlayback();
+    expect(video.pause).toHaveBeenCalledOnce();
+    expect(ui.state().previewingClip).toBe(false);
+    video.pause.mockClear(); video.currentTime = 150;
+    ui.updatePlayback();
+    expect(video.currentTime).toBe(150);
+    expect(video.pause).not.toHaveBeenCalled();
+  });
+
+  it('lets native seeking escape a clip preview without pausing or rewinding', () => {
+    const ui = editor(), video = player();
+    ui.playback(video); ui.playClip();
+    video.currentTime = 150; video.seeking = true;
+    ui.updatePlayback();
+    expect(video.pause).not.toHaveBeenCalled();
+    ui.finishSeeking(); video.seeking = false;
+    ui.updatePlayback();
+    expect(ui.state().previewingClip).toBe(false);
+    expect(video.currentTime).toBe(150);
+    expect(video.pause).not.toHaveBeenCalled();
+  });
+
+  it('bounds source navigation to its full duration and cancels clip preview', () => {
+    const ui = editor(), video = player();
+    ui.playback(video); ui.playClip();
+    ui.seek(150);
+    expect(video.currentTime).toBe(150);
+    expect(ui.state().previewingClip).toBe(false);
+    ui.seek(-10); expect(video.currentTime).toBe(0);
+    ui.seek(700); expect(video.currentTime).toBe(600);
+    ui.seek(NaN); expect(video.currentTime).toBe(600);
+    ui.playback(video, NaN); ui.seek(20);
+    expect(video.currentTime).toBe(600);
+  });
+
+  it('marks a passage beyond the initial excerpt while keeping valid bounds', () => {
+    const ui = editor();
+    ui.playback(player(150)); ui.setBoundary('start');
+    expect(ui.state().project.clips[0]).toMatchObject({ start: 150, end: 170 });
+    ui.playback(player(180)); ui.setBoundary('end');
+    expect(ui.state().project.clips[0]).toMatchObject({ start: 150, end: 180 });
+    ui.playback(player(590)); ui.setBoundary('start');
+    expect(ui.state().project.clips[0]).toMatchObject({ start: 590, end: 600 });
+    ui.playback(player(5)); ui.setBoundary('end');
+    expect(ui.state().project.clips[0]).toMatchObject({ start: 0, end: 5 });
+  });
+
+  it('marks the actual video position immediately after a seek, before timeupdate', () => {
+    const ui = editor(), video = player();
+    ui.playback(video);
+    video.currentTime = 150;
+    ui.setBoundary('start');
+    expect(ui.state().project.clips[0]).toMatchObject({ start: 150, end: 170 });
+    ui.seek(180); ui.setBoundary('end');
+    expect(ui.state().project.clips[0]).toMatchObject({ start: 150, end: 180 });
+  });
+
+  it('clears clip preview when selecting another excerpt', () => {
+    const ui = editor(), video = player();
+    ui.setup({ ...structuredClone(project), clips: [clip, { ...clip, start: 50, end: 60 }] });
+    ui.playback(video); ui.playClip(); ui.selectClip(1);
+    expect(ui.state().previewingClip).toBe(false);
+    expect(video.currentTime).toBe(50);
+  });
+
+  it('formats a precise source position for short and long videos', () => {
+    const ui = editor();
+    expect([0, 65, 5400, NaN].map(ui.timecode)).toEqual(['0:00', '1:05', '90:00', '—']);
   });
 });
 
