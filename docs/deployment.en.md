@@ -60,13 +60,13 @@ sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw allow 21000/tcp
 sudo ufw allow 50000:50100/tcp
-sudo ufw allow 51413/tcp
-sudo ufw allow 51413/udp
+sudo ufw allow 42420/tcp
+sudo ufw allow 42420/udp
 sudo ufw enable
 sudo ufw status verbose
 ```
 
-Check a new SSH connection after enabling the firewall. Mirror these openings in the provider's firewall, if any. Port `21000` and range `50000–50100` are used for explicit FTPS; `51413` is used for BitTorrent peers. PostgreSQL `5432` and qBittorrent RPC `8080` remain internal to Docker.
+Check a new SSH connection after enabling the firewall. Mirror these openings in the provider's firewall, if any. Port `21000` and range `50000–50100` are used for explicit FTPS; `42420` is used for BitTorrent peers by default. If you change `QBT_PEER_PORT` in the next step, adjust both TCP/UDP openings. PostgreSQL `5432` and qBittorrent RPC `8080` remain internal to Docker.
 
 **Only if this host already runs a public DNS service**, preserve its TCP and UDP DNS ports as well:
 
@@ -102,6 +102,7 @@ Edit `.env` with a text editor. Run `openssl rand -hex 32` again for each secret
 | `DATABASE_URL` | `postgresql://duck:PASSWORD@postgres:5432/duck`, using exactly the value of `POSTGRES_PASSWORD`. |
 | `BETTER_AUTH_SECRET`, `INTERNAL_API_SECRET` | Two other independent secrets. |
 | `QBT_USERNAME`, `QBT_PASSWORD` | Internal RPC username and a secret at least 24 characters long. The username accepts ASCII letters, digits, dot, hyphen and underscore. |
+| `QBT_PEER_PORT` | `42420` by default; an integer from `1024` to `65535`, available on the host. The same TCP/UDP port is used by the qBittorrent engine and published by Docker. |
 | `ACME_EMAIL` | Certificate contact address, for example `admin@example.com`. |
 | `ADMIN_EMAIL` | Email of the future administrator signing up, for example `admin@example.com`; an empty value disables automatic assignment. |
 
@@ -375,6 +376,26 @@ Studio also requires this full update: PostgreSQL schema, the new `studio` image
 Cleanup runs before building and on exit, including failures: only untagged project images that are no longer used by any container are removed. Unused build cache in the default Docker builder is reduced with `--keep-storage 1GB`; this cache is shared with any other projects on the host. The script requires at least 10% free plus 5 GiB on the Docker filesystem before building. It creates no archive or backup image tag and removes no volume, shared file, download or existing backup. Output stays in the terminal.
 
 Keep regular off-host backups and test their restoration separately: this script does not create one for every deployment. It does not automatically pull new PostgreSQL or Certbot images; update those as a maintenance operation. Review any new `.env.example` variables before deploying. Preserve `.env`, `DATA_ROOT` and existing secrets, particularly `POSTGRES_ADMIN_PASSWORD`, `POSTGRES_PASSWORD` and the password in `DATABASE_URL`: changing only these variables does not change the passwords of an initialized database. Rotation must coordinate PostgreSQL and application configuration. Keep PostgreSQL on major version 17 for this procedure; a major version upgrade requires a dedicated migration. Repeat the functional checks after updating.
+
+### Change the qBittorrent peer port
+
+On an existing installation using `51413`, first open the new TCP/UDP port on the host and in the provider's firewall. To switch to `42420` with the updated code:
+
+```sh
+sudo ufw allow 42420/tcp
+sudo ufw allow 42420/udp
+```
+
+Add or change `QBT_PEER_PORT=42420` in `.env`, then rebuild and recreate only qBittorrent from `/opt/torrentduck`:
+
+```sh
+sudo docker compose config -q
+sudo docker compose up -d --no-deps --build --force-recreate qbittorrent
+sudo docker compose ps qbittorrent
+sudo docker compose logs --tail=100 qbittorrent
+```
+
+This briefly interrupts transfers. Check that the new port is published for TCP/UDP, reachable from outside and working with an authorized torrent before closing `51413` on the host and at the provider, only if no other service uses it. For another port, adjust `.env` and both openings together; simply restarting the container does not apply new Docker port publications.
 
 ## Protocol tests on a test instance
 

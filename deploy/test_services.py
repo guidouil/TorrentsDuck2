@@ -207,6 +207,22 @@ esac
                 with self.subTest(service=service, mount=mount):
                     self.assertTrue(Path(mount.split(":", 1)[0]).is_absolute())
 
+    @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
+    def test_qbt_peer_port_matches_published_tcp_and_udp_ports(self):
+        for value, expected in [("", "42420"), ("58473", "58473")]:
+            with self.subTest(value=value):
+                result = subprocess.run(
+                    ["docker", "compose", "--env-file", ".env.example", "config", "--format", "json"],
+                    cwd=Path(__file__).resolve().parents[1], env={**os.environ, "QBT_PEER_PORT": value},
+                    check=True, capture_output=True, text=True,
+                )
+                qbt_service = json.loads(result.stdout)["services"]["qbittorrent"]
+                self.assertEqual(qbt_service["environment"]["QBT_PEER_PORT"], expected)
+                self.assertEqual(
+                    {(port["protocol"], port["target"], port["published"]) for port in qbt_service["ports"]},
+                    {("tcp", int(expected), expected), ("udp", int(expected), expected)},
+                )
+
     def test_firewall_precedes_docker_and_blocks_private_destinations(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -303,14 +319,28 @@ esac
     def test_qbt_hash_and_fail_closed(self):
         with tempfile.TemporaryDirectory() as root:
             with self.assertRaises(ValueError):
-                qbt.configure(root, "duck", "short")
-            qbt.configure(root, "duck-rpc", "a long production RPC password!")
+                qbt.configure(root, "duck", "short", "42420")
+            qbt.configure(root, "duck-rpc", "a long production RPC password!", "42420")
             text = (Path(root) / "qBittorrent/qBittorrent.conf").read_text()
             encoded = text.split("@ByteArray(")[1].split(")")[0]
             salt, key = map(base64.b64decode, encoded.split(":"))
             self.assertEqual(key, hashlib.pbkdf2_hmac("sha512", b"a long production RPC password!", salt, 100000, 64))
             self.assertIn("LocalHostAuth=true", text)
+            self.assertIn("Session\\Port=42420", text)
             self.assertNotIn("a long production RPC password!", text)
+
+    def test_qbt_peer_port_validation_preserves_existing_config(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "qBittorrent/qBittorrent.conf"
+            for port in ["1024", "58473", "65535"]:
+                with self.subTest(port=port):
+                    qbt.configure(root, "duck-rpc", "a long production RPC password!", port)
+                    self.assertIn("Session\\Port=" + port, path.read_text())
+            previous = path.read_bytes()
+            for port in ["", "0", "1023", "65536", "999999", "abc", "42420/tcp", "42420\n", "042420"]:
+                with self.subTest(port=port), self.assertRaises(ValueError):
+                    qbt.configure(root, "duck-rpc", "a long production RPC password!", port)
+                self.assertEqual(path.read_bytes(), previous)
 
     def test_qbt_sources_bootstrap_preserves_existing_and_removed_plugins(self):
         sources = Path(__file__).parent / "qbittorrent/search"

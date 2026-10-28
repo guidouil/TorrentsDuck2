@@ -16,7 +16,7 @@ x-logging: &logging
   driver: json-file
   options:
     max-size: 10m
-    max-file: '3'
+    max-file: "3"
 
 services:
   postgres:
@@ -67,9 +67,9 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       NODE_ENV: production
       HOST: 0.0.0.0
-      PORT: '3000'
+      PORT: "3000"
       ADDRESS_HEADER: X-Forwarded-For
-      XFF_DEPTH: '1'
+      XFF_DEPTH: "1"
       PROTOCOL_HEADER: X-Forwarded-Proto
       HOST_HEADER: X-Forwarded-Host
       BODY_SIZE_LIMIT: 1073741824
@@ -86,9 +86,9 @@ services:
       - /sys/fs/cgroup:/host-cgroup:ro
     networks: [edge, database, rpc, auth]
     depends_on:
-      postgres: {condition: service_healthy}
+      postgres: { condition: service_healthy }
     read_only: true
-    tmpfs: ['/tmp:size=64m,mode=1777']
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 1g
@@ -112,10 +112,10 @@ services:
       - ${DATA_ROOT:-/srv/torrentduck}/studio:/data/studio
     networks: [database]
     depends_on:
-      postgres: {condition: service_healthy}
+      postgres: { condition: service_healthy }
     user: 10000:10000
     read_only: true
-    tmpfs: ['/tmp:size=32m,mode=1777']
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 4g
@@ -129,18 +129,23 @@ services:
     environment:
       QBT_USERNAME: ${QBT_USERNAME:?Set QBT_USERNAME}
       QBT_PASSWORD: ${QBT_PASSWORD:?Set QBT_PASSWORD}
+      QBT_PEER_PORT: ${QBT_PEER_PORT:-55555}
       HOME: /config
     volumes:
       - ${DATA_ROOT:-/srv/torrentduck}/qbittorrent:/config
       - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads
-    ports: ['51413:51413/tcp', '51413:51413/udp']
+    ports:
+      [
+        "${QBT_PEER_PORT:-55555}:${QBT_PEER_PORT:-55555}/tcp",
+        "${QBT_PEER_PORT:-55555}:${QBT_PEER_PORT:-55555}/udp",
+      ]
     networks:
-      rpc: {ipv4_address: 172.30.20.2}
-      torrent: {ipv4_address: 172.30.40.2, gw_priority: 1}
-    sysctls: {net.ipv6.conf.all.disable_ipv6: '1'}
+      rpc: { ipv4_address: 172.30.20.2 }
+      torrent: { ipv4_address: 172.30.40.2, gw_priority: 1 }
+    sysctls: { net.ipv6.conf.all.disable_ipv6: "1" }
     user: 10000:10000
     read_only: true
-    tmpfs: ['/tmp:size=32m,mode=1777']
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 2g
@@ -153,7 +158,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN}
       NGINX_ENVSUBST_FILTER: DOMAIN
-    ports: ['80:80', '443:443']
+    ports: ["80:80", "443:443"]
     volumes:
       - ./deploy/nginx/site.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ${DATA_ROOT:-/srv/torrentduck}/certificates:/etc/letsencrypt:ro
@@ -164,7 +169,8 @@ services:
     networks: [edge]
     depends_on: [web]
     read_only: true
-    tmpfs: [/etc/nginx/conf.d:size=1m, /var/cache/nginx:size=64m, /var/run:size=1m]
+    tmpfs:
+      [/etc/nginx/conf.d:size=1m, /var/cache/nginx:size=64m, /var/run:size=1m]
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE, SETUID, SETGID, CHOWN, DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
@@ -179,7 +185,7 @@ services:
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?Set INTERNAL_API_SECRET}
       FTP_AUTH_URL: http://web:3000/api/internal/ftp-auth
       PUBLIC_IPV4: ${PUBLIC_IPV4:?Set PUBLIC_IPV4}
-    ports: ['21000:21000', '50000-50100:50000-50100']
+    ports: ["21000:21000", "50000-50100:50000-50100"]
     volumes:
       - ${DATA_ROOT:-/srv/torrentduck}/ftp-tls:/etc/ssl/private:ro
       - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads
@@ -187,7 +193,7 @@ services:
     networks: [ftp_edge, auth]
     depends_on: [web]
     read_only: true
-    tmpfs: [/run:size=4m, '/tmp:size=16m,mode=1777']
+    tmpfs: [/run:size=4m, "/tmp:size=16m,mode=1777"]
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, SYS_CHROOT, KILL]
     security_opt: [no-new-privileges:true]
@@ -206,9 +212,9 @@ services:
     logging: *logging
 
 networks:
-  edge: {ipam: {config: [{subnet: 172.30.10.0/24}]}}
-  database: {internal: true, ipam: {config: [{subnet: 172.30.11.0/24}]}}
-  rpc: {internal: true, ipam: {config: [{subnet: 172.30.20.0/24}]}}
-  auth: {internal: true, ipam: {config: [{subnet: 172.30.30.0/24}]}}
-  torrent: {ipam: {config: [{subnet: 172.30.40.0/24}]}}
-  ftp_edge: {ipam: {config: [{subnet: 172.30.50.0/24}]}}
+  edge: { ipam: { config: [{ subnet: 172.30.10.0/24 }] } }
+  database: { internal: true, ipam: { config: [{ subnet: 172.30.11.0/24 }] } }
+  rpc: { internal: true, ipam: { config: [{ subnet: 172.30.20.0/24 }] } }
+  auth: { internal: true, ipam: { config: [{ subnet: 172.30.30.0/24 }] } }
+  torrent: { ipam: { config: [{ subnet: 172.30.40.0/24 }] } }
+  ftp_edge: { ipam: { config: [{ subnet: 172.30.50.0/24 }] } }

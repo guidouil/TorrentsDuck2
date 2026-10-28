@@ -60,13 +60,13 @@ sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw allow 21000/tcp
 sudo ufw allow 50000:50100/tcp
-sudo ufw allow 51413/tcp
-sudo ufw allow 51413/udp
+sudo ufw allow 42420/tcp
+sudo ufw allow 42420/udp
 sudo ufw enable
 sudo ufw status verbose
 ```
 
-Vérifier une nouvelle connexion SSH après activation. Reproduire ces ouvertures sur le pare-feu du fournisseur, s'il existe. Le port `21000` et la plage `50000–50100` servent au FTPS explicite ; `51413` sert aux pairs BitTorrent. PostgreSQL `5432` et le RPC qBittorrent `8080` restent internes à Docker.
+Vérifier une nouvelle connexion SSH après activation. Reproduire ces ouvertures sur le pare-feu du fournisseur, s'il existe. Le port `21000` et la plage `50000–50100` servent au FTPS explicite ; `42420` sert aux pairs BitTorrent par défaut. Si `QBT_PEER_PORT` est modifié à l'étape suivante, adapter ces deux ouvertures TCP/UDP. PostgreSQL `5432` et le RPC qBittorrent `8080` restent internes à Docker.
 
 **Uniquement si cet hôte assure déjà un service DNS public**, conserver aussi ses ports DNS TCP et UDP :
 
@@ -102,6 +102,7 @@ openssl rand -hex 32
 | `DATABASE_URL` | `postgresql://duck:MOT_DE_PASSE@postgres:5432/duck`, avec exactement la valeur de `POSTGRES_PASSWORD`. |
 | `BETTER_AUTH_SECRET`, `INTERNAL_API_SECRET` | Deux autres secrets indépendants. |
 | `QBT_USERNAME`, `QBT_PASSWORD` | Identifiant RPC interne et secret d'au moins 24 caractères. Le nom accepte lettres ASCII, chiffres, point, tiret et underscore. |
+| `QBT_PEER_PORT` | `42420` par défaut ; entier de `1024` à `65535`, libre sur l'hôte. Le même port TCP/UDP est utilisé par le moteur qBittorrent et publié par Docker. |
 | `ACME_EMAIL` | Adresse de contact pour les certificats, par exemple `admin@example.com`. |
 | `ADMIN_EMAIL` | Adresse du futur administrateur inscrit, par exemple `admin@example.com` ; une valeur vide désactive l'attribution automatique. |
 
@@ -387,6 +388,26 @@ Le Studio nécessite aussi cette mise à jour complète : migration PostgreSQL, 
 Le nettoyage s'exécute avant la construction et à la sortie, même en cas d'échec : seules les images sans tag du projet qui ne sont plus utilisées par un conteneur sont supprimées. Le cache de build inutilisé du builder Docker par défaut est réduit avec `--keep-storage 1GB` ; ce cache est commun aux autres projets éventuels de l'hôte. Le script exige au moins 10 % libres plus 5 Gio sur le volume Docker avant de construire. Il ne crée ni archive ni tag de sauvegarde et ne supprime aucun volume, fichier partagé, téléchargement ou sauvegarde existante. Les sorties restent dans le terminal.
 
 Conserver une sauvegarde externe régulière et éprouver sa restauration séparément : ce script n'en crée pas à chaque déploiement. Il ne télécharge pas automatiquement de nouvelles images PostgreSQL ou Certbot ; leur mise à jour reste une opération de maintenance. Examiner les éventuelles nouvelles variables de `.env.example` avant le déploiement. Garder `.env`, `DATA_ROOT` et les secrets existants, en particulier `POSTGRES_ADMIN_PASSWORD`, `POSTGRES_PASSWORD` et le mot de passe de `DATABASE_URL` : changer seulement ces variables ne change pas les mots de passe d'une base déjà initialisée. Une rotation doit coordonner PostgreSQL et la configuration applicative. Maintenir PostgreSQL en version majeure 17 pour cette procédure ; un changement de version majeure exige une migration dédiée. Reprendre les contrôles de fonctionnement après la mise à jour.
+
+### Changer le port des pairs qBittorrent
+
+Sur une installation existante utilisant `51413`, ouvrir d'abord le nouveau port TCP/UDP sur l'hôte et le pare-feu du fournisseur. Pour passer à `42420` avec le code à jour :
+
+```sh
+sudo ufw allow 42420/tcp
+sudo ufw allow 42420/udp
+```
+
+Ajouter ou modifier `QBT_PEER_PORT=42420` dans `.env`, puis reconstruire et recréer seulement qBittorrent depuis `/opt/torrentduck` :
+
+```sh
+sudo docker compose config -q
+sudo docker compose up -d --no-deps --build --force-recreate qbittorrent
+sudo docker compose ps qbittorrent
+sudo docker compose logs --tail=100 qbittorrent
+```
+
+Cette opération interrompt brièvement les transferts. Vérifier la publication du nouveau port en TCP/UDP, son accessibilité depuis l'extérieur et le fonctionnement d'un torrent autorisé avant de fermer `51413` sur l'hôte et chez le fournisseur, seulement si aucun autre service ne l'utilise. Pour un autre port, adapter `.env` et les deux ouvertures ensemble ; un simple redémarrage du conteneur n'applique pas les nouvelles publications Docker.
 
 ## Tests de protocoles sur une instance de test
 

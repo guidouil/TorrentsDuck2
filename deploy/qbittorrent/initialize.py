@@ -8,9 +8,11 @@ import re
 from pathlib import Path
 
 
-def configure(root, username, password):
+def configure(root, username, password, peer_port):
     if not re.fullmatch(r"[a-zA-Z0-9_.-]{3,64}", username or "") or len(password or "") < 24:
         raise ValueError("Set QBT_USERNAME and a QBT_PASSWORD of at least 24 characters")
+    if not re.fullmatch(r"[1-9][0-9]{3,4}", peer_port or "") or not 1024 <= int(peer_port) <= 65535:
+        raise ValueError("Set QBT_PEER_PORT to an integer from 1024 to 65535")
     config = configparser.ConfigParser(interpolation=None, strict=False, delimiters=("=",))
     config.optionxform = str
     path = Path(root) / "qBittorrent" / "qBittorrent.conf"
@@ -36,7 +38,7 @@ def configure(root, username, password):
     })
     config["BitTorrent"].update({
         r"Session\DefaultSavePath": "/data/downloads",
-        r"Session\Port": "51413",
+        r"Session\Port": peer_port,
         r"Session\UseUPnP": "false",
         r"Session\MaxConnections": "400",
     })
@@ -69,5 +71,5 @@ def install_search_sources(data_root, sources_root):
 
 
 if __name__ == "__main__":
-    configure(os.environ.get("XDG_CONFIG_HOME", "/config"), os.environ.get("QBT_USERNAME"), os.environ.get("QBT_PASSWORD"))
+    configure(os.environ.get("XDG_CONFIG_HOME", "/config"), os.environ.get("QBT_USERNAME"), os.environ.get("QBT_PASSWORD"), os.environ.get("QBT_PEER_PORT", "42420"))
     install_search_sources(os.environ.get("XDG_DATA_HOME", "/config/data"), "/usr/local/share/torrentduck/search")
