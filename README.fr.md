@@ -16,6 +16,7 @@ L'ensemble du projet a été orchestré avec **OpenAI Sol 6.1 Ultra**.
 
 - **Torrents collectifs** : recherche et gestion des transferts via qBittorrent.
 - **Bibliothèque partagée** : exploration, téléchargement et liens de lecture révocables, avec ouverture dans VLC.
+- **Duck Studio** : assemblage privé de courts extraits, cadrage horizontal ou vertical, titres et sous-titres SRT, puis export ou partage d'un MP4.
 - **Accès web et FTPS** : mêmes espaces de fichiers et accès réservés aux comptes actifs et approuvés.
 - **Gestion de la communauté** : validation des inscriptions, administration des comptes et permission dédiée à la gestion des sources de recherche.
 - **Connexion sur téléviseur** : autorisation depuis un téléphone par QR code, sans saisir le mot de passe sur la télé.
@@ -69,6 +70,14 @@ Pour connecter une télé sans y saisir son mot de passe, choisir « Se connecte
 
 Dans l’explorateur, l’action « Ouvrir dans VLC » prépare un lien de lecture valable six heures et révocable. Sur Android, iPhone et iPad, toucher ensuite le bouton « Ouvrir dans VLC » de la fenêtre pour transmettre le média à l’application installée ; le navigateur peut demander confirmation. Le site ne peut pas vérifier si VLC est installé. La copie du lien et la playlist restent disponibles, notamment sur ordinateur ou si le navigateur bloque l’ouverture de l’application.
 
+### Duck Studio
+
+Ouvrir **Studio**, ou choisir **Créer un extrait** dans la bibliothèque. Un projet assemble des passages d'une ou plusieurs vidéos existantes sur une seule piste, dans la limite de cinq minutes au total. Choisir 16:9 ou 9:16, déplacer le cadre de chaque extrait, sélectionner la piste audio d'origine et ajouter un titre. Importer un SRT puis corriger son texte et ses horaires sur la chronologie du montage final ; les sous-titres sont incrustés dans l'image exportée.
+
+Projets, aperçus et exports sont privés. Télécharger le MP4 H.264/AAC en 1080p ou partager explicitement une copie terminée avec la communauté : le fichier publié rejoint `share`, avec ses permissions collectives existantes. Les sources restent intactes. Un format incompatible avec le navigateur peut utiliser un aperçu léger des passages choisis, préparé à la demande.
+
+Le service séparé `studio` traite une tâche à la fois, avec des plafonds initiaux d'un CPU et 4 Gio. Les tâches en attente survivent au redémarrage ; celles interrompues échouent et peuvent être relancées. La réserve disque de 10 % s'applique aussi au volume privé du studio. Le [guide de déploiement](docs/deployment.md#duck-studio) décrit le stockage, les mesures de performance et les limites de sauvegarde. La transcription automatique et la publication directe sur YouTube/TikTok ne sont pas incluses.
+
 ### Recherche et sources
 
 La page Recherche permet de trouver des torrents puis de les ajouter aux
@@ -115,6 +124,8 @@ npm run dev
 ```
 
 Pour les fichiers locaux, définir `DATA_ROOT=./data`, `DOWNLOADS_DIR=./data/downloads`, `SHARE_DIR=./data/share` et `FILE_DELIVERY=node`, puis créer ces dossiers. Définir `ORIGIN` et `BETTER_AUTH_URL` sur `http://127.0.0.1:5173`, et `DATABASE_URL` sur le port PostgreSQL publié sur l’hôte (`postgres` est un nom interne à Docker). `npm run dev` charge automatiquement `.env` au démarrage ; redémarrer le serveur après toute modification de ce fichier. Le compte administrateur initial se crée avec `node --env-file=.env --run admin:create` et les variables `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. En cas de migration des comptes Meteor, effectuer l'import avant cette création : l'import exige une table utilisateurs vide.
+
+Pour développer le Studio sur l'hôte, définir aussi `STUDIO_DIR=./data/studio` et créer ce dossier. Installer FFmpeg 6.1+ avec libass/fontconfig et DejaVu Sans, puis lancer `node --env-file=.env --import tsx scripts/studio-worker.ts` à côté du serveur web. La pile Docker locale inclut ce worker et son propre volume persistant `studio`. Les tests médias natifs s'exécutent si FFmpeg/FFprobe sont disponibles ; les tests du cycle de vie du worker nécessitent aussi `TEST_DATABASE_URL` vers une base de test dédiée.
 
 ### Vérifications
 

@@ -15,7 +15,7 @@
   let lastSample = $state(0);
   let history = $state<{ download: number; upload: number }[]>([]);
   let peaks = $state({ download: 0, upload: 0 });
-  const serviceNames = [{ id: 'web', name: 'Web' }, { id: 'qbittorrent', name: 'qBittorrent' }, { id: 'postgres', name: 'PostgreSQL' }, { id: 'nginx', name: 'Nginx' }, { id: 'ftp', name: 'FTPS' }];
+  const serviceNames = [{ id: 'web', name: 'Web' }, { id: 'qbittorrent', name: 'qBittorrent' }, { id: 'postgres', name: 'PostgreSQL' }, { id: 'nginx', name: 'Nginx' }, { id: 'ftp', name: 'FTPS' }, { id: 'studio', name: 'Studio' }];
   const downloadSpeed = $derived(lastSample ? transferSpeed(stats.downloadSpeed ?? stats.dl_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.downloadSpeed, 0)) : null);
   const uploadSpeed = $derived(lastSample ? transferSpeed(stats.uploadSpeed ?? stats.up_info_speed ?? torrents.reduce((sum, torrent) => sum + torrent.uploadSpeed, 0)) : null);
   const diskUsage = $derived(diskPercent(storage));

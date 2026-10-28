@@ -16,6 +16,7 @@ The entire project was orchestrated with **OpenAI Sol 6.1 Ultra**.
 
 - **Collective torrents**: search and manage shared transfers through qBittorrent.
 - **Shared library**: browse, download and create revocable playback links, with VLC integration.
+- **Duck Studio**: privately assemble short clips, crop for horizontal or vertical video, add titles and SRT subtitles, then export or share an MP4.
 - **Web and FTPS access**: the same file spaces, available to active, approved accounts.
 - **Community administration**: registration approval, account management and a dedicated permission for managing search sources.
 - **TV sign-in**: approve a QR code from a phone without typing a password on the TV.
@@ -71,6 +72,14 @@ To connect a TV without entering a password on it, choose “Sign in with my pho
 
 In the file browser, “Open in VLC” prepares a revocable playback link valid for six hours. On Android, iPhone and iPad, then tap the dialog's “Open in VLC” button to pass the media to the installed app; the browser may ask for confirmation. The website cannot check whether VLC is installed. Copying the link and downloading the playlist remain available, including on desktop or when the browser blocks opening the app.
 
+### Duck Studio
+
+Open **Studio**, or choose **Create a clip** in the library. A project assembles passages from one or several existing videos on a single track, up to five minutes in total. Choose 16:9 or 9:16, adjust each crop, select the original audio track and add a title. Import an SRT and edit its text and timecodes on the final montage timeline; subtitles are burned into the exported image.
+
+Projects, previews and exports are private. Download the H.264/AAC MP4 in 1080p, or explicitly share a finished copy with the community: the published file belongs to `share`, with its existing collective permissions. Sources remain unchanged. Unsupported browser formats can use a low-resolution preview of the selected passages, prepared on demand.
+
+The separate `studio` service processes one task at a time, limited initially to one CPU and 4 GiB. Queued tasks persist across restarts; interrupted tasks fail and can be restarted. The 10% disk reserve also applies to the private studio volume. The [deployment guide](docs/deployment.en.md#duck-studio) covers storage, performance checks and backup limits. There is no automatic transcription or direct YouTube/TikTok publishing.
+
 ### Search and sources
 
 The Search page finds torrents and adds them to collective transfers. The initial catalogue includes The Pirate Bay, Torrents CSV, Nyaa.si and LimeTorrents; Snowfl is available as an optional installation. An administrator can grant selected members the additional “Source manager” permission to install, enable, disable or remove catalogue plugins. The pinned versions are bundled in the qBittorrent image, and their [sources and licenses](deploy/qbittorrent/search/SOURCES.md) are kept in the repository. External indexer availability may vary.
@@ -102,6 +111,8 @@ npm run dev
 ```
 
 For local files, set `DATA_ROOT=./data`, `DOWNLOADS_DIR=./data/downloads`, `SHARE_DIR=./data/share` and `FILE_DELIVERY=node`, then create those directories. Set `ORIGIN` and `BETTER_AUTH_URL` to `http://127.0.0.1:5173`, and point `DATABASE_URL` at the PostgreSQL port published on the host (`postgres` is an internal Docker hostname). `npm run dev` loads `.env` automatically at startup; restart the server after changing this file. Create the initial administrator with `node --env-file=.env --run admin:create` and the `ADMIN_USERNAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` variables. If migrating Meteor accounts, import them before creating this account: the import requires an empty user table.
+
+For host-side Studio development, also set `STUDIO_DIR=./data/studio` and create this directory. Install FFmpeg 6.1+ with libass/fontconfig and DejaVu Sans, then run `node --env-file=.env --import tsx scripts/studio-worker.ts` alongside the web server. The local Docker stack includes this worker and its own persistent `studio` volume. Native media tests run when FFmpeg/FFprobe are available; worker lifecycle tests also require `TEST_DATABASE_URL` pointing to a dedicated test database.
 
 ### Checks
 

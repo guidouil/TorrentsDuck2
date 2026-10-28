@@ -193,19 +193,23 @@ export function byteRange(header: string | null, size: number): { start: number;
 
 export async function downloadFile(event: RequestEvent, space: Space, requested: string, inline = false) {
 	const file = await resolveFile(space, requested);
-	const handle = await open(file.absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+	return fileResponse(event, file.absolute, path.basename(file.relative), inline, `/_protected/${space}/${file.relative.split('/').map(encodeURIComponent).join('/')}`);
+}
+
+export async function fileResponse(event: RequestEvent, absolute: string, name: string, inline = false, internalPath?: string) {
+	const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
 	const stat = await handle.stat();
 	if (!stat.isFile()) { await handle.close(); error(400, 'Fichier requis.'); }
-	const extension = path.extname(file.relative).toLowerCase();
+	const extension = path.extname(name).toLowerCase();
 	const media: Record<string, string> = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.mov': 'video/quicktime', '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.png': 'image/png' };
 	const headers = new Headers({
 		'content-type': media[extension] ?? 'application/octet-stream', 'accept-ranges': 'bytes',
-		'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(path.basename(file.relative))}`,
+		'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
 		'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'
 	});
-	if (process.env.FILE_DELIVERY === 'nginx') {
+	if (process.env.FILE_DELIVERY === 'nginx' && internalPath) {
 		await handle.close();
-		headers.set('x-accel-redirect', `/_protected/${space}/${file.relative.split('/').map(encodeURIComponent).join('/')}`);
+		headers.set('x-accel-redirect', internalPath);
 		return new Response(null, { headers });
 	}
 	let range;

@@ -4,11 +4,12 @@ name: torrentduck-local
 services:
   volumes:
     image: postgres:17-bookworm
-    entrypoint: [sh, -c, 'chown 10000:10000 /data/downloads /data/share /config']
+    entrypoint: [sh, -c, 'chown 10000:10000 /data/downloads /data/share /data/studio /config']
     network_mode: none
     volumes:
       - downloads:/data/downloads
       - share:/data/share
+      - studio:/data/studio
       - qbittorrent:/config
 
   postgres:
@@ -49,6 +50,7 @@ services:
       DATA_ROOT: /data
       DOWNLOADS_DIR: /data/downloads
       SHARE_DIR: /data/share
+      STUDIO_DIR: /data/studio
       QBT_DOWNLOAD_PATH: /data/downloads
       FILE_DELIVERY: node
       BODY_SIZE_LIMIT: '1073741824'
@@ -56,6 +58,7 @@ services:
     volumes:
       - downloads:/data/downloads
       - share:/data/share
+      - studio:/data/studio
     networks: [edge, database, rpc]
     depends_on:
       volumes: {condition: service_completed_successfully}
@@ -66,6 +69,34 @@ services:
       interval: 3s
       timeout: 5s
       retries: 30
+
+  studio:
+    build:
+      context: .
+      target: studio
+      args:
+        ORIGIN: http://127.0.0.1:5180
+    environment:
+      DATABASE_URL: postgresql://duck:local-postgres-app-password@postgres:5432/duck
+      DATA_ROOT: /data
+      DOWNLOADS_DIR: /data/downloads
+      SHARE_DIR: /data/share
+      STUDIO_DIR: /data/studio
+    volumes:
+      - downloads:/data/downloads:ro
+      - share:/data/share:ro
+      - studio:/data/studio
+    networks: [database]
+    depends_on:
+      volumes: {condition: service_completed_successfully}
+      web: {condition: service_healthy}
+    user: 10000:10000
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 4g
+    cpus: 1
 
   qbittorrent:
     build: deploy/qbittorrent
@@ -93,6 +124,7 @@ volumes:
   postgres:
   downloads:
   share:
+  studio:
   qbittorrent:
 
 networks:

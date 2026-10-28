@@ -34,6 +34,13 @@ server {
         autoindex off;
         add_header Cache-Control "private, no-store" always;
     }
+    location ^~ /_protected/studio/ {
+        internal;
+        alias /data/studio/;
+        disable_symlinks on;
+        autoindex off;
+        add_header Cache-Control "private, no-store" always;
+    }
     location / {
         resolver 127.0.0.11 valid=10s ipv6=off;
         set $application http://web:3000;

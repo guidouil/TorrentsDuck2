@@ -114,7 +114,7 @@ Create an A record for `duck.example.com` pointing to the server's IPv4 in your 
 Check that subnets `172.30.10.0/24`, `172.30.11.0/24`, `172.30.20.0/24`, `172.30.30.0/24`, `172.30.40.0/24` and `172.30.50.0/24` are available. If they conflict with existing networks, update `compose.yaml` and `deploy/firewall.sh` together before starting services. If using a different `DATA_ROOT`, adjust the directory paths below.
 
 ```sh
-sudo install -d -o 10000 -g 10000 -m 755 /srv/torrentduck/downloads /srv/torrentduck/share /srv/torrentduck/qbittorrent
+sudo install -d -o 10000 -g 10000 -m 755 /srv/torrentduck/downloads /srv/torrentduck/share /srv/torrentduck/qbittorrent /srv/torrentduck/studio
 sudo install -d -m 700 /srv/torrentduck/postgres /srv/torrentduck/certificates /srv/torrentduck/ftp-tls
 sudo install -d -m 755 /srv/torrentduck/acme
 sudo docker compose config -q
@@ -160,7 +160,7 @@ In Administration, the **Pending** tab lists unapproved accounts with their emai
 
 ```sh
 sudo docker compose ps
-sudo docker compose logs --tail=100 web nginx ftp qbittorrent postgres
+sudo docker compose logs --tail=100 web nginx ftp qbittorrent postgres studio
 sudo docker compose exec -T nginx nginx -t
 sudo systemctl status torrentduck.service torrentduck-firewall.service --no-pager
 sudo systemctl list-timers torrentduck-certificates.timer --no-pager
@@ -273,6 +273,28 @@ The `compose.local.yaml` stack keeps qBittorrent on an internal network without
 Internet indexer access. URL sources use the `web` network connection; local tests
 still use simulated responses.
 
+## Duck Studio
+
+Studio assembles a single video track from existing `downloads` and `share` files, limited to **300 seconds in total**. It preserves sources and supports 16:9 and 9:16, manual cropping, the original audio track, titles and SRT imports. SRT timecodes refer to the final montage; text and timecodes can be edited before burning subtitles into the image. Exports are H.264/AAC MP4 files in 1080p. Low-resolution previews of selected passages are prepared on demand, without automatically converting a whole film. Automatic transcription and direct YouTube/TikTok publishing are excluded.
+
+The `studio` service uses the Docker target of the same name, including FFmpeg, libass and DejaVu Sans. It processes one task at a time with initial limits of **4 GiB RAM and 1 CPU**, without GPU or published ports, on the internal PostgreSQL network only. Its `downloads` and `share` mounts are read-only. Tasks persist in PostgreSQL: queued tasks survive restarts, while an interrupted render is marked failed and can be restarted. Each render uses the montage version saved when it was launched.
+
+The host's `DATA_ROOT/studio` directory is mounted at `/data/studio` (`STUDIO_DIR`) in `web` and `studio`, and read-only in Nginx. FTPS has no mount of this directory. Deployment creates it with owner `10000:10000` and mode `0755`, without modifying sources. API checks on ownership and account state keep files private; the Nginx `/_protected/studio/` location is strictly internal. Explicit confirmation publishes a complete, non-overwriting copy into `share`, making it collective under that space's existing deletion rules.
+
+Allow space for previews, intermediate files and exports. The 10% reserve is checked on the filesystem containing `STUDIO_DIR`, including during processing. Errors and cancellations clean up partial files; finished exports can be deleted from Studio. Sources must remain present and unchanged during a render: deletion, replacement or modification fails the task without publishing its result.
+
+After updating, check the service and export a one-minute test montage in horizontal and vertical formats, including a title and subtitles:
+
+```sh
+sudo docker compose ps studio
+sudo docker compose exec -T studio ffmpeg -version
+sudo docker compose logs --tail=100 studio
+```
+
+Measure actual render time, CPU load on Transfers and disk usage before increasing limits or concurrency. On a test instance, check a format unsupported by the browser, cancellation, worker restart and the disk reserve. With two accounts, verify that a project and its private export are inaccessible to the other account, then that only the explicitly published copy appears in `share` and FTPS. Also verify that disabling an account revokes access and stops its running task.
+
+Projects, subtitles and tasks are included in PostgreSQL backups. Private previews, intermediates and exports in `DATA_ROOT/studio` are excluded from automatic SSH and FTP backups; they can be regenerated while their sources remain available and unchanged. Copies published into `share` follow that space's existing backup policy. Old exports may therefore be absent after restoration and require another render.
+
 ## Operations, certificates and backups
 
 ```sh
@@ -292,7 +314,7 @@ The FTPS guard checks permissions every 5 seconds, with a maximum HTTP timeout o
 
 Docker logs are limited to 3 × 10 MB per service. Nginx disables its access log to protect playback and recovery link tokens. The application has no access to the Docker socket.
 
-The CPU card on the Transfers page measures Web, qBittorrent, PostgreSQL, Nginx and FTPS as a percentage of the host's total CPU capacity (100% = all cores busy). It compares the [cgroup v2 `cpu.stat` counters](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#cpu-interface-files) between shared snapshots, about every 3 seconds while the page is open. `compose.yaml` places each service in a `torrentduck-<service>.slice` and mounts `/sys/fs/cgroup` read-only in `web`; it adds no write access or Docker socket. These readings use Ubuntu 24.04's `systemd` cgroup driver and cgroup v2: check `sudo docker info --format '{{.CgroupVersion}} {{.CgroupDriver}}'` (expected: `2 systemd`). After updating, deployment must recreate the containers to apply these settings. The first reading, a missing service or another configuration shows an unavailable value; the local Docker stack keeps its portable configuration and does not provide these counters. Disk usage and the 10% reserve are calculated on the filesystem containing `DOWNLOADS_DIR` (the `downloads` directory under the host's `DATA_ROOT`), so they describe the data disk even when it is mounted separately from the operating system. Used space excludes free space reserved by the filesystem; the application's 10% threshold is unchanged.
+The CPU card on the Transfers page measures Web, qBittorrent, PostgreSQL, Nginx, FTPS and Studio as a percentage of the host's total CPU capacity (100% = all cores busy). It compares the [cgroup v2 `cpu.stat` counters](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#cpu-interface-files) between shared snapshots, about every 3 seconds while the page is open. `compose.yaml` places each service in a `torrentduck-<service>.slice` and mounts `/sys/fs/cgroup` read-only in `web`; it adds no write access or Docker socket. These readings use Ubuntu 24.04's `systemd` cgroup driver and cgroup v2: check `sudo docker info --format '{{.CgroupVersion}} {{.CgroupDriver}}'` (expected: `2 systemd`). After updating, deployment must recreate the containers to apply these settings. The first reading, a missing service or another configuration shows an unavailable value; the local Docker stack keeps its portable configuration and does not provide these counters. Disk usage and the 10% reserve are calculated on the filesystem containing `DOWNLOADS_DIR` (the `downloads` directory under the host's `DATA_ROOT`), so they describe the data disk even when it is mounted separately from the operating system. Used space excludes free space reserved by the filesystem; the application's 10% threshold is unchanged.
 
 On a backup workstation with Node 24, `age` and suitable SSH credentials, create an `age` key outside the repository, keep a second protected copy of the private key, then use its public recipient:
 
@@ -347,6 +369,8 @@ install -m 755 scripts/update.sh "$HOME/deploy-torrentduck.sh"
 For later updates, run `~/deploy-torrentduck.sh`, **without sudo before the script**. Git uses the current account; sudo requests its password for Docker and system operations. The checkout must have a branch with an upstream configured. The script rejects concurrent deployments and local changes, including untracked files that are not ignored, then runs `git pull --ff-only` and calls `scripts/deploy.sh`: image builds, schema, firewall and systemd units remain managed by the existing procedure. It then recreates Nginx to apply its template and checks `/api/health` through public HTTPS. Web and FTPS sessions may be interrupted.
 
 Administrator deletion in `downloads` requires this full update to rebuild the images and recreate the `web` and `ftp` containers with their new mounts; restarting alone is insufficient.
+
+Studio also requires this full update: PostgreSQL schema, the new `studio` image, private directory initialization and new mounts in `web` and Nginx. Preserve the same `DATA_ROOT`; no new secret is required.
 
 Cleanup runs before building and on exit, including failures: only untagged project images that are no longer used by any container are removed. Unused build cache in the default Docker builder is reduced with `--keep-storage 1GB`; this cache is shared with any other projects on the host. The script requires at least 10% free plus 5 GiB on the Docker filesystem before building. It creates no archive or backup image tag and removes no volume, shared file, download or existing backup. Output stays in the terminal.
 

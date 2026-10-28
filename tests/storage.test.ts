@@ -21,6 +21,10 @@ describe('data volume capacity', () => {
 		await storageStatus();
 		expect(mocked.statfs).toHaveBeenCalledWith('/volumes/data');
 	});
+	it('can protect a separate Studio or publication filesystem', async () => {
+		await requireStorage(100, '/volumes/studio');
+		expect(mocked.statfs).toHaveBeenCalledWith('/volumes/studio');
+	});
 
 	it('separates actual used space from filesystem and application reserves', async () => {
 		expect(await storageStatus()).toEqual({ total: 100000, used: 70000, available: 25000, reserved: 10000, usable: 15000, canDownload: true });

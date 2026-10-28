@@ -125,11 +125,11 @@ esac
         configuration = json.loads(result.stdout)
         self.assertEqual(configuration["name"], "torrentduck-local")
         services = configuration["services"]
-        self.assertEqual(set(services), {"volumes", "postgres", "web", "qbittorrent"})
+        self.assertEqual(set(services), {"volumes", "postgres", "web", "qbittorrent", "studio"})
         self.assertEqual(services["web"]["ports"][0]["host_ip"], "127.0.0.1")
         self.assertEqual(services["web"]["ports"][0]["published"], "5180")
         self.assertEqual(services["web"]["build"]["args"]["ORIGIN"], services["web"]["environment"]["ORIGIN"])
-        for service in ["postgres", "qbittorrent"]:
+        for service in ["postgres", "qbittorrent", "studio"]:
             self.assertFalse(services[service].get("ports"))
             self.assertTrue(all(configuration["networks"][name]["internal"] for name in services[service]["networks"]))
         self.assertEqual(services["web"]["depends_on"]["postgres"]["condition"], "service_healthy")
@@ -139,7 +139,46 @@ esac
             downloads = next(mount for mount in services[service]["volumes"] if mount["target"] == "/data/downloads")
             self.assertEqual(downloads["source"], "downloads")
             self.assertFalse(downloads.get("read_only", False))
-        self.assertEqual(set(configuration["volumes"]), {"postgres", "downloads", "share", "qbittorrent"})
+        self.assertEqual(set(configuration["volumes"]), {"postgres", "downloads", "share", "qbittorrent", "studio"})
+        self.assertIn("/data/studio", services["volumes"]["entrypoint"][-1])
+        self.assertEqual(services["studio"]["depends_on"]["web"]["condition"], "service_healthy")
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
+    def test_studio_worker_has_bounded_resources_and_private_storage(self):
+        root = Path(__file__).resolve().parents[1]
+        for options in [["--env-file", ".env.example"], ["-f", "compose.local.yaml"]]:
+            with self.subTest(options=options):
+                result = subprocess.run(
+                    ["docker", "compose", *options, "config", "--format", "json"],
+                    cwd=root, check=True, capture_output=True, text=True,
+                )
+                configuration = json.loads(result.stdout)
+                services = configuration["services"]
+                worker = services["studio"]
+                self.assertEqual(worker["build"]["target"], "studio")
+                self.assertEqual(worker["cpus"], 1)
+                self.assertEqual(int(worker["mem_limit"]), 4 * 1024 ** 3)
+                self.assertEqual(worker["user"], "10000:10000")
+                self.assertTrue(worker["read_only"])
+                self.assertEqual(worker["cap_drop"], ["ALL"])
+                self.assertIn("no-new-privileges:true", worker["security_opt"])
+                self.assertFalse(worker.get("ports"))
+                self.assertTrue(all(configuration["networks"][name]["internal"] for name in worker["networks"]))
+                self.assertEqual(set(worker["environment"]), {"DATABASE_URL", "DATA_ROOT", "DOWNLOADS_DIR", "SHARE_DIR", "STUDIO_DIR"})
+                for target in ["/data/downloads", "/data/share"]:
+                    mount = next(mount for mount in worker["volumes"] if mount["target"] == target)
+                    self.assertTrue(mount["read_only"])
+                for service in ["web", "studio"]:
+                    mount = next(mount for mount in services[service]["volumes"] if mount["target"] == "/data/studio")
+                    self.assertFalse(mount.get("read_only", False))
+                if "ftp" in services:
+                    self.assertFalse(any(mount["target"] == "/data/studio" for mount in services["ftp"]["volumes"]))
+                    mount = next(mount for mount in services["nginx"]["volumes"] if mount["target"] == "/data/studio")
+                    self.assertTrue(mount["read_only"])
+        template = (root / "deploy/nginx/site.conf.template").read_text()
+        private_location = template.split("location ^~ /_protected/studio/ {", 1)[1].split("}", 1)[0]
+        for protection in ["internal;", "alias /data/studio/;", "disable_symlinks on;", "autoindex off;"]:
+            self.assertIn(protection, private_location)
 
     @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
     def test_service_cpu_metrics_have_separate_cgroups_and_read_only_access(self):
@@ -148,7 +187,7 @@ esac
             cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True, text=True,
         )
         services = json.loads(result.stdout)["services"]
-        for service in ["web", "qbittorrent", "postgres", "nginx", "ftp"]:
+        for service in ["web", "qbittorrent", "postgres", "nginx", "ftp", "studio"]:
             self.assertEqual(services[service]["cgroup_parent"], f"torrentduck-{service}.slice")
         mount = next(mount for mount in services["web"]["volumes"] if mount["target"] == "/host-cgroup")
         self.assertEqual(mount["source"], "/sys/fs/cgroup")

@@ -17,10 +17,25 @@ describe('anonymous API boundary', () => {
 		'../src/routes/api/torrents/+server',
 		'../src/routes/api/torrents/[hash]/+server',
 		'../src/routes/api/events/+server',
-		'../src/routes/api/chat/+server'
+		'../src/routes/api/chat/+server',
+		'../src/routes/api/studio/+server',
+		'../src/routes/api/studio/[id]/+server',
+		'../src/routes/api/studio/[id]/jobs/[jobId]/file/+server'
 	])('rejects %s before reading collective data', async (route) => {
 		const { GET } = await import(route);
 		await expect(GET({ request: new Request('http://localhost/api'), url: new URL('http://localhost/api') } as RequestEvent)).rejects.toMatchObject({ status: 401 });
+		expect(mocked.query).not.toHaveBeenCalled();
+	});
+	it.each([
+		['../src/routes/api/studio/+server', 'POST'],
+		['../src/routes/api/studio/[id]/+server', 'PATCH'],
+		['../src/routes/api/studio/[id]/+server', 'DELETE'],
+		['../src/routes/api/studio/[id]/jobs/+server', 'POST'],
+		['../src/routes/api/studio/[id]/jobs/[jobId]/+server', 'DELETE'],
+		['../src/routes/api/studio/[id]/jobs/[jobId]/publish/+server', 'POST']
+	])('protects Studio mutation %s %s before accessing private data', async (route, method) => {
+		const handlers = await import(route);
+		await expect(handlers[method]({ request: new Request('http://localhost/api'), url: new URL('http://localhost/api') } as RequestEvent)).rejects.toMatchObject({ status: 401 });
 		expect(mocked.query).not.toHaveBeenCalled();
 	});
 	it('rejects invalid chat pagination before asking the database', async () => {

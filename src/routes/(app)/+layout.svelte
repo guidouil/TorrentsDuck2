@@ -37,8 +37,8 @@
   <aside class="sidebar">
     <QuackLogo href="/" />
     <nav aria-label={$t.mainNavigation}>
-      {#each [{ href: '/', label: $t.transfers, icon: 'transfer' }, { href: '/search', label: $t.searchPage, icon: 'search' }, { href: '/files', label: $t.files, icon: 'files' }, { href: '/chat', label: $t.chat, icon: 'chat' }, ...(data.user?.role === 'admin' ? [{ href: '/admin', label: $t.admin, icon: 'settings' }] : [])] as item (item.href)}
-        {@const active = page.url.pathname === item.href || (item.href === '/search' && page.url.pathname.startsWith('/search/'))}
+      {#each [{ href: '/', label: $t.transfers, icon: 'transfer' }, { href: '/search', label: $t.searchPage, icon: 'search' }, { href: '/files', label: $t.files, icon: 'files' }, { href: '/studio', label: $t.studio.title, icon: 'video-file' }, { href: '/chat', label: $t.chat, icon: 'chat' }, ...(data.user?.role === 'admin' ? [{ href: '/admin', label: $t.admin, icon: 'settings' }] : [])] as item (item.href)}
+        {@const active = page.url.pathname === item.href || (['/search', '/studio'].includes(item.href) && page.url.pathname.startsWith(`${item.href}/`))}
         <a href={item.href} class={{ active }} aria-label={item.label} aria-current={active ? 'page' : undefined}><span class="nav-icon"><Icon name={item.icon as IconName} size={24} /></span><span class={{ 'nav-full-label': item.href === '/admin' }}>{item.label}</span>{#if item.href === '/admin'}<span class="nav-compact-label">{$t.adminShort}</span>{/if}</a>
       {/each}
     </nav>

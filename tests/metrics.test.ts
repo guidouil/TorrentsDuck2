@@ -18,11 +18,11 @@ describe('service CPU metrics', () => {
 		const { serviceMetrics } = await import('../src/lib/server/metrics');
 		const first = await serviceMetrics();
 		expect(first.cpuCount).toBe(4);
-		expect(first.services).toEqual(['web', 'qbittorrent', 'postgres', 'nginx', 'ftp'].map((id) => ({ id, cpuPercent: null })));
+		expect(first.services).toEqual(['web', 'qbittorrent', 'postgres', 'nginx', 'ftp', 'studio'].map((id) => ({ id, cpuPercent: null })));
 		mocked.read.mockResolvedValue('usage_usec 3000000\n');
 		vi.mocked(performance.now).mockReturnValue(3000);
 		const second = await serviceMetrics();
-		expect(second.services.map((service) => service.cpuPercent)).toEqual([25, 25, 25, 25, 25]);
+		expect(second.services.map((service) => service.cpuPercent)).toEqual([25, 25, 25, 25, 25, 25]);
 		expect(mocked.read).toHaveBeenCalledWith('/host-cgroup/torrentduck.slice/torrentduck-web.slice/cpu.stat', 'utf8');
 	});
 

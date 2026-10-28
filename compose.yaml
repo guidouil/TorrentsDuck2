@@ -76,11 +76,13 @@ services:
       DATA_ROOT: /data
       DOWNLOADS_DIR: /data/downloads
       SHARE_DIR: /data/share
+      STUDIO_DIR: /data/studio
       QBT_DOWNLOAD_PATH: /data/downloads
       FILE_DELIVERY: nginx
     volumes:
       - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads
       - ${DATA_ROOT:-/srv/torrentduck}/share:/data/share
+      - ${DATA_ROOT:-/srv/torrentduck}/studio:/data/studio
       - /sys/fs/cgroup:/host-cgroup:ro
     networks: [edge, database, rpc, auth]
     depends_on:
@@ -90,6 +92,34 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 1g
+    logging: *logging
+
+  studio:
+    build:
+      context: .
+      target: studio
+    cgroup_parent: torrentduck-studio.slice
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      DATA_ROOT: /data
+      DOWNLOADS_DIR: /data/downloads
+      SHARE_DIR: /data/share
+      STUDIO_DIR: /data/studio
+    volumes:
+      - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads:ro
+      - ${DATA_ROOT:-/srv/torrentduck}/share:/data/share:ro
+      - ${DATA_ROOT:-/srv/torrentduck}/studio:/data/studio
+    networks: [database]
+    depends_on:
+      postgres: {condition: service_healthy}
+    user: 10000:10000
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 4g
+    cpus: 1
     logging: *logging
 
   qbittorrent:
@@ -130,6 +160,7 @@ services:
       - ${DATA_ROOT:-/srv/torrentduck}/acme:/var/www/acme:ro
       - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads:ro
       - ${DATA_ROOT:-/srv/torrentduck}/share:/data/share:ro
+      - ${DATA_ROOT:-/srv/torrentduck}/studio:/data/studio:ro
     networks: [edge]
     depends_on: [web]
     read_only: true

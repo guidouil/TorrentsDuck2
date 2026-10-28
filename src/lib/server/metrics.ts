@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { cpus } from 'node:os';
 
-const serviceIds = ['web', 'qbittorrent', 'postgres', 'nginx', 'ftp'] as const;
+const serviceIds = ['web', 'qbittorrent', 'postgres', 'nginx', 'ftp', 'studio'] as const;
 const previous = new Map<string, { usage: number; time: number; inode: number }>();
 
 export async function serviceMetrics() {

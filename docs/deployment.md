@@ -114,7 +114,7 @@ Créer dans la zone DNS du domaine un enregistrement A pour `duck.example.com` v
 Vérifier que les sous-réseaux `172.30.10.0/24`, `172.30.11.0/24`, `172.30.20.0/24`, `172.30.30.0/24`, `172.30.40.0/24` et `172.30.50.0/24` sont libres. En cas de conflit, modifier ensemble `compose.yaml` et `deploy/firewall.sh` avant tout démarrage. Si `DATA_ROOT` diffère, adapter les chemins de création ci-dessous.
 
 ```sh
-sudo install -d -o 10000 -g 10000 -m 755 /srv/torrentduck/downloads /srv/torrentduck/share /srv/torrentduck/qbittorrent
+sudo install -d -o 10000 -g 10000 -m 755 /srv/torrentduck/downloads /srv/torrentduck/share /srv/torrentduck/qbittorrent /srv/torrentduck/studio
 sudo install -d -m 700 /srv/torrentduck/postgres /srv/torrentduck/certificates /srv/torrentduck/ftp-tls
 sudo install -d -m 755 /srv/torrentduck/acme
 sudo docker compose config -q
@@ -160,7 +160,7 @@ Le bouton **Tout supprimer** efface définitivement tous les comptes en attente 
 
 ```sh
 sudo docker compose ps
-sudo docker compose logs --tail=100 web nginx ftp qbittorrent postgres
+sudo docker compose logs --tail=100 web nginx ftp qbittorrent postgres studio
 sudo docker compose exec -T nginx nginx -t
 sudo systemctl status torrentduck.service torrentduck-firewall.service --no-pager
 sudo systemctl list-timers torrentduck-certificates.timer --no-pager
@@ -285,6 +285,28 @@ retirées ou désactivées restent dans cet état après redémarrage. La pile
 indexeurs Internet. Les sources URL utilisent la sortie réseau de `web` ; les
 tests locaux restent fondés sur des réponses simulées.
 
+## Duck Studio
+
+Le Studio assemble une seule piste vidéo à partir des fichiers existants de `downloads` et `share`, dans la limite de **300 secondes au total**. Il conserve les originaux et propose les formats 16:9 et 9:16, le cadrage manuel, la piste audio d'origine, les titres et l'import SRT. Les horaires SRT concernent le montage final ; leur texte et leurs horaires sont modifiables avant incrustation. Les exports sont des MP4 H.264/AAC en 1080p. Les aperçus basse résolution sont préparés à la demande pour les passages choisis, sans convertir automatiquement un film entier. La transcription automatique et la publication directe sur YouTube/TikTok sont exclues.
+
+Le service `studio` utilise le target Docker du même nom, avec FFmpeg, libass et DejaVu Sans. Il traite une tâche à la fois avec des plafonds initiaux de **4 Gio de RAM et 1 CPU**, sans GPU ni port publié, sur le seul réseau interne PostgreSQL. `downloads` et `share` y sont montés en lecture seule. Les tâches sont conservées dans PostgreSQL : celles en attente reprennent après redémarrage, tandis qu'un rendu interrompu est signalé en échec et peut être relancé. Chaque rendu utilise la version du montage enregistrée au lancement.
+
+Le dossier hôte `DATA_ROOT/studio` est monté sur `/data/studio` (`STUDIO_DIR`) dans `web` et `studio`, et en lecture seule dans Nginx. Il est absent de FTPS. Le script de déploiement le crée avec propriétaire `10000:10000` et mode `0755`, sans modifier les sources. Les fichiers restent privés grâce au contrôle du propriétaire et de l'état du compte dans les API ; l'emplacement Nginx `/_protected/studio/` est strictement interne. Le partage nécessite une confirmation explicite et publie une copie complète sans écrasement dans `share`, qui devient collective avec ses règles de suppression habituelles.
+
+Prévoir de la place pour les aperçus, les fichiers intermédiaires et les exports. La réserve de 10 % est vérifiée sur le système de fichiers contenant `STUDIO_DIR`, y compris pendant les traitements. Les erreurs et annulations nettoient les fichiers partiels ; les exports terminés peuvent être supprimés depuis le Studio. Les sources doivent rester présentes et inchangées pendant le rendu : leur suppression, remplacement ou modification provoque un échec sans publication.
+
+Après mise à jour, vérifier le service puis exporter un montage d'essai d'une minute, horizontal et vertical, avec un titre et des sous-titres :
+
+```sh
+sudo docker compose ps studio
+sudo docker compose exec -T studio ffmpeg -version
+sudo docker compose logs --tail=100 studio
+```
+
+Mesurer le temps réel, la charge CPU sur la page Transferts et la place disque avant d'augmenter les limites ou le nombre de tâches simultanées. Tester un format incompatible avec le navigateur, l'annulation, le redémarrage du worker et la réserve disque sur une instance de test. Avec deux comptes, vérifier qu'un projet et son export privé sont inaccessibles à l'autre compte, puis que seule la copie explicitement partagée apparaît dans `share` et en FTPS. Vérifier aussi qu'un compte désactivé perd ses accès et que son travail en cours s'arrête.
+
+Les projets, sous-titres et tâches sont inclus dans les sauvegardes PostgreSQL. Les aperçus, intermédiaires et exports privés de `DATA_ROOT/studio` sont exclus des sauvegardes SSH et FTP automatiques ; ils sont régénérables tant que leurs sources restent disponibles et inchangées. Une copie publiée dans `share` suit la politique de sauvegarde existante de cet espace. Après restauration, les anciens exports peuvent donc être absents et nécessiter une relance.
+
 ## Exploitation, certificats et sauvegardes
 
 ```sh
@@ -304,7 +326,7 @@ Le gardien FTPS vérifie les autorisations toutes les 5 secondes, avec un délai
 
 Les journaux Docker sont limités à 3 × 10 Mo par service. Nginx désactive son journal d'accès pour protéger les jetons des liens de lecture et de récupération. L'application n'a pas accès au socket Docker.
 
-La carte CPU de la page Transferts mesure Web, qBittorrent, PostgreSQL, Nginx et FTPS en pourcentage de la capacité CPU totale de l'hôte (100 % = tous les cœurs occupés). Le relevé compare les compteurs [`cpu.stat` de cgroup v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#cpu-interface-files) entre deux instantanés partagés, environ toutes les 3 secondes lorsque la page est ouverte. `compose.yaml` place chaque service dans une slice `torrentduck-<service>.slice` et monte `/sys/fs/cgroup` dans `web` en lecture seule ; aucun droit d'écriture ni socket Docker n'est ajouté. Ces relevés utilisent le pilote cgroup `systemd` et cgroup v2 d'Ubuntu 24.04 : vérifier `sudo docker info --format '{{.CgroupVersion}} {{.CgroupDriver}}'` (résultat attendu : `2 systemd`). Après la mise à jour, les conteneurs doivent être recréés par le déploiement pour appliquer ces paramètres. Un premier relevé, un service absent ou une configuration différente affiche une valeur indisponible ; la pile Docker locale garde sa configuration portable et ne fournit pas ces compteurs. Le remplissage et la réserve de 10 % sont calculés sur le système de fichiers de `DOWNLOADS_DIR` (le dossier `downloads` de `DATA_ROOT` sur l’hôte), afin de mesurer le disque de données même lorsqu’il est monté séparément du système. Le remplissage exclut les espaces encore libres réservés par le système de fichiers ; le seuil applicatif de 10 % reste inchangé.
+La carte CPU de la page Transferts mesure Web, qBittorrent, PostgreSQL, Nginx, FTPS et Studio en pourcentage de la capacité CPU totale de l'hôte (100 % = tous les cœurs occupés). Le relevé compare les compteurs [`cpu.stat` de cgroup v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#cpu-interface-files) entre deux instantanés partagés, environ toutes les 3 secondes lorsque la page est ouverte. `compose.yaml` place chaque service dans une slice `torrentduck-<service>.slice` et monte `/sys/fs/cgroup` dans `web` en lecture seule ; aucun droit d'écriture ni socket Docker n'est ajouté. Ces relevés utilisent le pilote cgroup `systemd` et cgroup v2 d'Ubuntu 24.04 : vérifier `sudo docker info --format '{{.CgroupVersion}} {{.CgroupDriver}}'` (résultat attendu : `2 systemd`). Après la mise à jour, les conteneurs doivent être recréés par le déploiement pour appliquer ces paramètres. Un premier relevé, un service absent ou une configuration différente affiche une valeur indisponible ; la pile Docker locale garde sa configuration portable et ne fournit pas ces compteurs. Le remplissage et la réserve de 10 % sont calculés sur le système de fichiers de `DOWNLOADS_DIR` (le dossier `downloads` de `DATA_ROOT` sur l’hôte), afin de mesurer le disque de données même lorsqu’il est monté séparément du système. Le remplissage exclut les espaces encore libres réservés par le système de fichiers ; le seuil applicatif de 10 % reste inchangé.
 
 Sur un poste de sauvegarde avec Node 24, `age` et une identité SSH adaptée, créer une clé `age` hors du dépôt, garder une seconde copie protégée de sa clé privée, puis utiliser son destinataire public :
 
@@ -359,6 +381,8 @@ install -m 755 scripts/update.sh "$HOME/deploy-torrentduck.sh"
 Les fois suivantes, lancer simplement `~/deploy-torrentduck.sh`, **sans sudo devant le script**. Git utilise le compte courant ; sudo demande le mot de passe pour la partie Docker et système. Le dépôt doit avoir une branche avec un suivi distant configuré. Le script refuse deux déploiements simultanés et les modifications locales, y compris les fichiers non suivis non ignorés, puis fait `git pull --ff-only` et appelle `scripts/deploy.sh` : construction, schéma, pare-feu et unités systemd restent gérés par la procédure existante. Il recrée ensuite Nginx pour appliquer son template et vérifie `/api/health` en HTTPS public. Les sessions web et FTPS peuvent être interrompues.
 
 La suppression administrateur dans `downloads` nécessite cette mise à jour complète pour reconstruire les images et recréer les conteneurs `web` et `ftp` avec leurs nouveaux montages ; un simple redémarrage ne suffit pas.
+
+Le Studio nécessite aussi cette mise à jour complète : migration PostgreSQL, construction de l'image `studio`, initialisation du dossier privé et nouveaux montages dans `web` et Nginx. Garder le même `DATA_ROOT` ; aucun nouveau secret n'est requis.
 
 Le nettoyage s'exécute avant la construction et à la sortie, même en cas d'échec : seules les images sans tag du projet qui ne sont plus utilisées par un conteneur sont supprimées. Le cache de build inutilisé du builder Docker par défaut est réduit avec `--keep-storage 1GB` ; ce cache est commun aux autres projets éventuels de l'hôte. Le script exige au moins 10 % libres plus 5 Gio sur le volume Docker avant de construire. Il ne crée ni archive ni tag de sauvegarde et ne supprime aucun volume, fichier partagé, téléchargement ou sauvegarde existante. Les sorties restent dans le terminal.
 
