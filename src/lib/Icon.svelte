@@ -47,8 +47,11 @@
     <path d={paths.duck} />
   </svg>
 {:else}
-  <svg width={size} height={size} viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" focusable="false">
+  <svg width={size} height={size} viewBox="0 -960 960 960" fill={name === 'cone' ? '#ff8800' : 'currentColor'} aria-hidden="true" focusable="false">
     <path d={paths[name]} />
+    {#if name === 'cone'}
+      <path fill="#fff" d="M401-720h158l30 80H371l30-80ZM326-520h308l30 80H296l30-80Z" />
+    {/if}
   </svg>
 {/if}
 
