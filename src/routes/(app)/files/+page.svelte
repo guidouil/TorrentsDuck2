@@ -8,6 +8,7 @@
   import Icon from '#lib/Icon.svelte';
   let { data } = $props();
   type Entry = { name: string; path: string; directory: boolean; size: number; modifiedAt: string };
+  type AudioTrack = { id: number; label: string; codec: string };
   const location = $derived(page.shallow?.url ?? page.url);
   const space = $derived(location.searchParams.get('space') === 'share' ? 'share' : 'downloads');
   const canDelete = $derived(space === 'share' || data.user?.role === 'admin');
@@ -21,10 +22,14 @@
   let filesInput = $state<HTMLInputElement>(); let dialogOpen = $state(false); let operation = $state('mkdir'); let selected = $state<Entry | null>(null); let newName = $state('');
   let videoOpen = $state(false); let video = $state<Entry | null>(null); let linkOpen = $state(false); let link = $state<any>(null);
   let vlcLink = $state('');
+  let player = $state<HTMLVideoElement>();
+  let audioTracks = $state<AudioTrack[]>([]); let selectedAudio = $state(''); let audioLoading = $state(false); let audioSwitching = $state(false); let audioError = $state(''); let mobilePlayback = $state(false);
+  let audioRequestNumber = 0;
+  let resumePlayback: { time: number; paused: boolean; volume: number; muted: boolean; rate: number } | null = null;
   let ftpsOpen = $state(false);
   let requestNumber = 0;
   const fileIcon = (name: string) => /\.(mp4|m4v|webm|ogv|mkv|mov|avi|mpeg|mpg|wmv|flv|m2ts|mts|vob|3gp)$/i.test(name) ? 'video-file' : /\.(mp3|m4a|ogg|oga|flac|wav|aac|opus|aiff|aif|wma|ape|alac)$/i.test(name) ? 'audio-file' : 'file';
-  const fileUrl = (entry: Entry, inline = false) => `/api/files/download?${new URLSearchParams({ space, path: entry.path, ...(inline ? { inline: '1' } : {}) })}`;
+  const fileUrl = (entry: Entry, inline = false, audio = '') => `/api/files/download?${new URLSearchParams({ space, path: entry.path, ...(inline ? { inline: '1', ...(audio ? { audio } : {}) } : {}) })}`;
   async function loadFiles() { const number = ++requestNumber; loading = true; error = ''; try { const result = await api(`/api/files?${new URLSearchParams({ space, path, search: query, sort, offset: String(offset), limit: '50' })}`); if (number !== requestNumber) return; entries = result.entries; total = result.total; } catch (e) { if (number === requestNumber) error = (e as Error).message; } finally { if (number === requestNumber) loading = false; } }
   $effect(() => { space; path; query; sort; offset; void loadFiles(); });
   $effect(() => { space; path; dialogOpen = false; videoOpen = false; linkOpen = false; });
@@ -52,6 +57,43 @@
     return '';
   }
   async function makeLink(entry: Entry) { busy = true; error = ''; try { link = await api('/api/files/share', { method: 'POST', body: JSON.stringify({ space, path: entry.path }) }); vlcLink = mobileVlcUrl(link.url, entry.name); linkOpen = true; } catch (e) { error = (e as Error).message; } finally { busy = false; } }
+  function canPlayAudio(codec: string) {
+    const mime = codec.startsWith('A_AAC') ? 'audio/mp4; codecs="mp4a.40.2"' : ({ A_OPUS: 'audio/webm; codecs="opus"', A_VORBIS: 'audio/webm; codecs="vorbis"', 'A_MPEG/L3': 'audio/mpeg', A_FLAC: 'audio/flac', A_AC3: 'audio/mp4; codecs="ac-3"', A_EAC3: 'audio/mp4; codecs="ec-3"' } as Record<string, string>)[codec];
+    return !!mime && !!player?.canPlayType(mime);
+  }
+  async function openVideo(entry: Entry) {
+    const request = ++audioRequestNumber;
+    video = entry; videoOpen = true; audioTracks = []; selectedAudio = ''; audioError = ''; audioSwitching = false; resumePlayback = null;
+    mobilePlayback = !!mobileVlcUrl(new URL(fileUrl(entry, true), location.href).href, entry.name);
+    audioLoading = /\.mkv$/i.test(entry.name);
+    if (!audioLoading) return;
+    try {
+      const result = await api<{ audioTracks: AudioTrack[] }>(`/api/files/audio?${new URLSearchParams({ space, path: entry.path })}`);
+      if (request !== audioRequestNumber || !videoOpen) return;
+      audioTracks = result.audioTracks;
+      selectedAudio = String(audioTracks.find((track) => canPlayAudio(track.codec))?.id ?? '');
+    } catch (e) { if (request === audioRequestNumber && videoOpen) audioError = (e as Error).message; }
+    finally { if (request === audioRequestNumber) audioLoading = false; }
+  }
+  function changeAudioTrack(id: string) {
+    if (!player || audioSwitching || id === selectedAudio || !audioTracks.some((track) => String(track.id) === id && canPlayAudio(track.codec))) return;
+    resumePlayback ??= { time: player.currentTime, paused: player.paused, volume: player.volume, muted: player.muted, rate: player.playbackRate };
+    player.pause();
+    audioError = ''; audioSwitching = true; selectedAudio = id;
+  }
+  function loadedVideo(event: Event) {
+    const element = event.currentTarget as HTMLVideoElement;
+    audioSwitching = false;
+    const resume = resumePlayback;
+    resumePlayback = null;
+    element.muted = resume?.muted ?? false;
+    element.volume = resume?.volume ?? 1;
+    if (!resume) return;
+    element.playbackRate = resume.rate;
+    element.currentTime = resume.time;
+    const request = audioRequestNumber;
+    if (!resume.paused) void element.play().catch(() => { if (request === audioRequestNumber && videoOpen) audioError = $t.audioResumeHelp; });
+  }
   async function revoke() { try { await api('/api/files/share', { method: 'DELETE', body: JSON.stringify({ id: link.id }) }); linkOpen = false; notice = $t.linkRevoked; } catch (e) { error = (e as Error).message; } }
   async function copyLink() { try { await navigator.clipboard.writeText(new URL(link.url, window.location.origin).href); notice = $t.linkCopied; } catch { notice = $t.copyManually; } }
   function downloadPlaylist() { const blob = new Blob([`#EXTM3U\n${new URL(link.url, window.location.origin).href}\n`], { type: 'audio/x-mpegurl' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'torrents-duck.m3u'; a.click(); URL.revokeObjectURL(url); }
@@ -89,7 +131,7 @@
             <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" disabled={busy} onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" size={24} /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name={fileIcon(entry.name)} size={24} /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.size}</span>{entry.directory ? '—' : bytes(entry.size)}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.date}</span>{new Date(entry.modifiedAt).toLocaleDateString($language)}</td>
-            <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}{#if fileIcon(entry.name) === 'video-file'}<a class="icon-button" title={$t.studio.createClip} aria-label={$t.studio.createClip} href={`/studio?${new URLSearchParams({ space, path: entry.path })}`}><Icon name="edit" size={22} /><span class="action-label">{$t.studio.createClip}</span></a>{/if}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={22} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => { video = entry; videoOpen = true; }}><Icon name="play" size={22} /><span class="action-label">{$t.play}</span></button><button class="icon-button warning" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="cone" size={22} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={22} /><span class="action-label">{$t.rename}</span></button>{/if}{#if canDelete}<button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={22} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
+            <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}{#if fileIcon(entry.name) === 'video-file'}<a class="icon-button" title={$t.studio.createClip} aria-label={$t.studio.createClip} href={`/studio?${new URLSearchParams({ space, path: entry.path })}`}><Icon name="edit" size={22} /><span class="action-label">{$t.studio.createClip}</span></a>{/if}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={22} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => openVideo(entry)}><Icon name="play" size={22} /><span class="action-label">{$t.play}</span></button><button class="icon-button warning" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="cone" size={22} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={22} /><span class="action-label">{$t.rename}</span></button>{/if}{#if canDelete}<button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={22} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
           </tr>
         {/each}
       </tbody>
@@ -98,7 +140,24 @@
 {/if}
 <div class="panel-bottom"><span>{total} {$t.items} · {$t.ftpsPort}</span><div class="pagination"><button aria-label={$t.previous} disabled={busy || loading || offset === 0} onclick={() => browse({ offset: String(Math.max(0, offset - 50)) })}><Icon name="chevron-left" size={18} /></button><span>{Math.floor(offset / 50) + 1} / {Math.max(1, Math.ceil(total / 50))}</span><button aria-label={$t.next} disabled={busy || loading || offset + 50 >= total} onclick={() => browse({ offset: String(offset + 50) })}><Icon name="chevron-right" size={18} /></button></div></div></section>
 <Modal bind:open={dialogOpen} title={operation === 'mkdir' ? $t.newFolder : operation === 'rename' ? $t.rename : $t.delete}><form onsubmit={mutate} class="form-stack">{#if operation === 'delete'}<p>{$t.deleteFileBefore} {selected?.name} {$t.deleteFileAfter}</p>{:else}<label>{$t.name}<input required bind:value={newName} maxlength={240} /></label>{/if}<div class="dialog-actions"><button type="button" class="secondary" onclick={() => { dialogOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: operation === 'delete' }]} disabled={busy}>{operation === 'delete' ? $t.deletePermanently : $t.save}</button></div></form></Modal>
-<Modal bind:open={videoOpen} title={video?.name ?? $t.play} wide={true}>{#if video && videoOpen}<video class="video-player" controls preload="metadata" src={fileUrl(video, true)} onloadedmetadata={(event) => { event.currentTarget.muted = false; event.currentTarget.volume = 1; }}><track kind="captions" />{$t.browserUnsupported}</video><p>{$t.playbackHelp}</p><div class="dialog-actions"><a class="button secondary" href={fileUrl(video)}>{$t.download}</a><button class="primary" onclick={() => video && makeLink(video)}>{$t.share}</button></div>{/if}</Modal>
+<Modal bind:open={videoOpen} title={video?.name ?? $t.play} wide={true}>
+  {#if video && videoOpen}
+    <video bind:this={player} class="video-player" controls playsinline preload="metadata" src={audioLoading ? undefined : fileUrl(video, true, selectedAudio)} onloadedmetadata={loadedVideo} onerror={() => { audioSwitching = false; audioError = $t.browserUnsupported; }}><track kind="captions" />{$t.browserUnsupported}</video>
+    {#if audioLoading}<p role="status">{$t.audioLoading}</p>
+    {:else if audioTracks.length}
+      <label class="audio-selector">{$t.audioTrack}
+        <select value={selectedAudio} disabled={audioSwitching || audioTracks.length < 2} onchange={(event) => changeAudioTrack(event.currentTarget.value)}>
+          {#if !selectedAudio}<option value="">{$t.audioBrowserDefault}</option>{/if}
+          {#each audioTracks as track (track.id)}<option value={String(track.id)} disabled={!canPlayAudio(track.codec)}>{track.label} · {track.codec}{canPlayAudio(track.codec) ? '' : ` · ${$t.audioNeedsVlc}`}</option>{/each}
+        </select>
+      </label>
+      <p class="muted">{$t.audioCompatibilityHelp}</p>
+    {/if}
+    {#if audioError}<p class="error" role="alert">{audioError}</p>{/if}
+    <p>{mobilePlayback ? $t.mobilePlaybackHelp : $t.playbackHelp}</p>
+    <div class="dialog-actions"><a class="button secondary" href={fileUrl(video)}>{$t.download}</a><button class="primary" disabled={busy} onclick={() => video && makeLink(video)}>{$t.share}</button></div>
+  {/if}
+</Modal>
 <Modal bind:open={linkOpen} title={$t.share}>{#if link}<p>{$t.linkExpires} {new Date(link.expiresAt).toLocaleString($language)}. {$t.linkPrivate}</p>{#if vlcLink}<p>{$t.vlcMobileHelp}</p>{/if}<div class="token-box">{link.url}</div><div class="dialog-actions"><button class="secondary danger" onclick={revoke}>{$t.revoke}</button><button class="secondary" onclick={copyLink}>{$t.copy}</button><button class={vlcLink ? 'secondary' : 'primary'} onclick={downloadPlaylist}>{$t.vlcPlaylist}</button>{#if vlcLink}<a class="button primary" href={vlcLink}>{$t.share}</a>{/if}</div>{/if}</Modal>
 <Modal bind:open={ftpsOpen} title={$t.ftpsTitle}>
   <p>{$t.ftpsInstructions}</p>
@@ -114,6 +173,8 @@
   <div class="dialog-actions"><button type="button" class="primary" onclick={() => { ftpsOpen = false; }}>{$t.close}</button></div>
 </Modal>
 <style>
+  .audio-selector{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+  .audio-selector select{width:100%;min-width:0;min-height:44px}
   .explorer-panel{display:flex;flex-direction:column;min-height:calc(100dvh - 44px);border-radius:var(--shape-lg)}
   .explorer-toolbar{gap:10px;padding:10px 12px}
   .tabs{flex-shrink:0}

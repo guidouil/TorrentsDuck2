@@ -11,6 +11,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import busboy from 'busboy';
 import { requireStorage } from './storage';
 import type { Member } from './permissions';
+import { mkvAudio } from './mkv.js';
 
 const run = promisify(execFile);
 
@@ -191,23 +192,41 @@ export function byteRange(header: string | null, size: number): { start: number;
 	return { start, end };
 }
 
-export async function downloadFile(event: RequestEvent, space: Space, requested: string, inline = false) {
+export async function fileAudioTracks(space: Space, requested: string) {
 	const file = await resolveFile(space, requested);
-	return fileResponse(event, file.absolute, path.basename(file.relative), inline, `/_protected/${space}/${file.relative.split('/').map(encodeURIComponent).join('/')}`);
+	if (path.extname(file.relative).toLowerCase() !== '.mkv') error(415, 'La sélection audio nécessite un fichier MKV.');
+	const handle = await open(file.absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+	try {
+		const stat = await handle.stat();
+		if (!stat.isFile()) error(400, 'Fichier requis.');
+		return (await mkvAudio(handle, stat.size)).audioTracks;
+	} finally { await handle.close(); }
 }
 
-export async function fileResponse(event: RequestEvent, absolute: string, name: string, inline = false, internalPath?: string) {
+export async function downloadFile(event: RequestEvent, space: Space, requested: string, inline = false, selectedAudioTrack?: number) {
+	const file = await resolveFile(space, requested);
+	return fileResponse(event, file.absolute, path.basename(file.relative), inline, `/_protected/${space}/${file.relative.split('/').map(encodeURIComponent).join('/')}`, selectedAudioTrack);
+}
+
+export async function fileResponse(event: RequestEvent, absolute: string, name: string, inline = false, internalPath?: string, selectedAudioTrack?: number) {
 	const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
 	const stat = await handle.stat();
 	if (!stat.isFile()) { await handle.close(); error(400, 'Fichier requis.'); }
 	const extension = path.extname(name).toLowerCase();
+	let patches: { offset: number; data: Buffer }[] = [];
+	if (selectedAudioTrack !== undefined) {
+		try {
+			if (!inline || extension !== '.mkv') error(400, 'La sélection audio nécessite une lecture MKV.');
+			patches = (await mkvAudio(handle, stat.size, selectedAudioTrack)).patches;
+		} catch (cause) { await handle.close(); throw cause; }
+	}
 	const media: Record<string, string> = { '.mp4': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.mov': 'video/quicktime', '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.png': 'image/png' };
 	const headers = new Headers({
 		'content-type': media[extension] ?? 'application/octet-stream', 'accept-ranges': 'bytes',
 		'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
 		'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'
 	});
-	if (process.env.FILE_DELIVERY === 'nginx' && internalPath) {
+	if (process.env.FILE_DELIVERY === 'nginx' && internalPath && selectedAudioTrack === undefined) {
 		await handle.close();
 		headers.set('x-accel-redirect', internalPath);
 		return new Response(null, { headers });
@@ -221,5 +240,17 @@ export async function fileResponse(event: RequestEvent, absolute: string, name: 
 	if (range) headers.set('content-range', `bytes ${start}-${end}/${stat.size}`);
 	if (event.request.method === 'HEAD' || stat.size === 0) { await handle.close(); return new Response(null, { status: range ? 206 : 200, headers }); }
 	const stream = handle.createReadStream({ start, end, autoClose: true });
-	return new Response(Readable.toWeb(stream) as ReadableStream, { status: range ? 206 : 200, headers });
+	if (!patches.length) return new Response(Readable.toWeb(stream) as ReadableStream, { status: range ? 206 : 200, headers });
+	// Only the MKV track headers change; byte positions and media packets stay intact for seeking.
+	let position = start;
+	const rewritten = stream.map((chunk: Buffer) => {
+		for (const patch of patches) {
+			const from = Math.max(position, patch.offset);
+			const to = Math.min(position + chunk.length, patch.offset + patch.data.length);
+			if (from < to) patch.data.copy(chunk, from - position, from - patch.offset, to - patch.offset);
+		}
+		position += chunk.length;
+		return chunk;
+	});
+	return new Response(Readable.toWeb(rewritten) as ReadableStream, { status: range ? 206 : 200, headers });
 }

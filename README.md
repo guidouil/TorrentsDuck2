@@ -72,6 +72,8 @@ To connect a TV without entering a password on it, choose “Sign in with my pho
 
 In the file browser, “Open in VLC” prepares a revocable playback link valid for six hours. On Android, iPhone and iPad, then tap the dialog's “Open in VLC” button to pass the media to the installed app; the browser may ask for confirmation. The website cannot check whether VLC is installed. Copying the link and downloading the playlist remain available, including on desktop or when the browser blocks opening the app.
 
+The web player's **Audio track** selector lists a MKV's languages and track names. On desktop, including Brave, changing tracks keeps the current position, pause state and volume so you can check a French dub's synchronization. Tracks whose audio codec the browser cannot decode require VLC; VLC is also recommended on phones and tablets. Selection changes only the streamed MKV headers, without modifying the shared file or re-encoding its media. Unusual MKV headers that cannot be read safely also fall back to VLC.
+
 ### Duck Studio
 
 Open **Studio**, or choose **Create a clip** in the library. Follow the three sections: add videos, choose passages, then export. A project assembles passages from one or several existing videos on a single track, up to five minutes in total. Browse the entire source with the seek slider or the ±10-second buttons, then mark the start and end of each passage. **Play clip** previews only the selected passage. Choose 16:9 or 9:16; collapsible sections hold optional audio, crop and title settings, thumbnails and SRT subtitles. Imported subtitles use the final montage timeline and are burned into the exported image.

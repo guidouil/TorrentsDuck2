@@ -13,6 +13,7 @@ describe('anonymous API boundary', () => {
 	it.each([
 		'../src/routes/api/files/+server',
 		'../src/routes/api/files/download/+server',
+		'../src/routes/api/files/audio/+server',
 		'../src/routes/api/files/share/+server',
 		'../src/routes/api/torrents/+server',
 		'../src/routes/api/torrents/[hash]/+server',
