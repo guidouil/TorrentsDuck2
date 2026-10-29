@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFile, spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -81,6 +81,50 @@ describe.skipIf(!available)('Studio with native FFmpeg and synthetic media', () 
 		expect(await audio('0.3')).toBeGreaterThan(500);
 		expect(await audio('1.4')).toBeLessThan(50);
 	}, 60_000);
+
+	it('adds synchronized French audio without changing source video/audio packets or cutting the film', async () => {
+		const bin = path.join(root, 'bin');
+		await mkdir(bin);
+		const french = path.join(root, 'french.m4a');
+		await exec('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=48000', '-af', 'adelay=500:all=1', '-t', '4', '-c:a', 'aac', french]);
+		const downloader = path.join(bin, 'yt-dlp');
+		await writeFile(downloader, `#!${process.execPath}\nconst fs = require('node:fs'); const args=process.argv.slice(2); if(!args.includes('--proxy') || !args.includes('--no-remote-components') || !args.includes('--no-plugin-dirs')) process.exit(1); fs.copyFileSync(${JSON.stringify(french)}, args[args.indexOf('--output')+1]);\n`);
+		await chmod(downloader, 0o755);
+		vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
+		const captions = path.join(root, 'captions.srt');
+		await writeFile(captions, '1\n00:00:00,100 --> 00:00:02,000\nOriginal caption\n');
+		const original = path.join(root, 'share/dub-source.mp4');
+		await exec('ffmpeg', ['-v', 'error', '-i', path.join(root, 'share/red.mp4'), '-i', captions, '-map', '0', '-map', '1:s:0', '-c', 'copy', '-c:s', 'mov_text', original]);
+		const dubSource: StudioSource = { space: 'share', path: 'dub-source.mp4' };
+		const packets = async (file: string, stream: string) => JSON.parse((await exec('ffprobe', ['-v', 'error', '-select_streams', stream, '-show_packets', '-show_data_hash', 'sha256', '-show_entries', 'packet=data_hash', '-of', 'json', file])).stdout).packets.map((packet: { data_hash: string }) => packet.data_hash);
+		const audioPeak = async (file: string, time: string) => {
+			const { stdout } = await exec('ffmpeg', ['-v', 'error', '-ss', time, '-i', file, '-map', '0:a:1', '-t', '0.15', '-ac', '1', '-ar', '8000', '-f', 's16le', 'pipe:1'], { encoding: 'buffer' });
+			let peak = 0;
+			for (let index = 0; index + 1 < stdout.length; index += 2) peak = Math.max(peak, Math.abs(stdout.readInt16LE(index)));
+			return peak;
+		};
+		const before = await readFile(original);
+		for (const offset of [0.5, -0.5]) {
+			const dubbed = job('dub');
+			dubbed.input = { project: empty, source: dubSource, fingerprint: (await sourceFingerprint(dubSource)).fingerprint, dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset } };
+			await runStudioJob(dubbed, { signal: signal() });
+			const output = await studioOutput(dubbed.id, 'dub');
+			const { stdout } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height:stream_tags=language:stream_disposition=default', '-of', 'json', output]);
+			const metadata = JSON.parse(stdout);
+			expect(Number(metadata.format.duration)).toBeCloseTo(3, 0);
+			expect(metadata.streams[0]).toMatchObject({ codec_type: 'video', width: 320, height: 180 });
+			expect(metadata.streams[1]).toMatchObject({ codec_type: 'audio', disposition: { default: 0 } });
+			expect(metadata.streams[2]).toMatchObject({ codec_type: 'audio', tags: { language: 'fra' }, disposition: { default: 1 } });
+			expect((await exec('ffmpeg', ['-v', 'error', '-i', output, '-map', '0:s:0', '-f', 'srt', 'pipe:1'])).stdout).toContain('Original caption');
+			expect(await packets(output, 'v:0')).toEqual(await packets(original, 'v:0'));
+			expect(await packets(output, 'a:0')).toEqual(await packets(original, 'a:0'));
+			if (offset > 0) expect(await audioPeak(output, '0.2')).toBeLessThan(50);
+			else expect(await audioPeak(output, '0.2')).toBeGreaterThan(500);
+			expect(await audioPeak(output, '1.3')).toBeGreaterThan(500);
+			expect(await readdir(path.dirname(output))).toEqual(['output.mkv']);
+		}
+		expect(await readFile(original)).toEqual(before);
+	}, 30_000);
 
 	it('produces only a short low resolution preview and refuses changed sources', async () => {
 		const preview = job('preview', { ...empty, aspect: '16:9', clips: [await clip('red.mp4', 1, 1.5, 1)] });

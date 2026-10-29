@@ -86,7 +86,7 @@ services:
       - downloads:/data/downloads:ro
       - share:/data/share:ro
       - studio:/data/studio
-    networks: [database]
+    networks: [edge, database]
     depends_on:
       volumes: {condition: service_completed_successfully}
       web: {condition: service_healthy}

@@ -131,6 +131,7 @@ esac
         self.assertEqual(services["web"]["build"]["args"]["ORIGIN"], services["web"]["environment"]["ORIGIN"])
         for service in ["postgres", "qbittorrent", "studio"]:
             self.assertFalse(services[service].get("ports"))
+        for service in ["postgres", "qbittorrent"]:
             self.assertTrue(all(configuration["networks"][name]["internal"] for name in services[service]["networks"]))
         self.assertEqual(services["web"]["depends_on"]["postgres"]["condition"], "service_healthy")
         self.assertIn("-h 127.0.0.1", services["postgres"]["healthcheck"]["test"][-1])
@@ -163,7 +164,9 @@ esac
                 self.assertEqual(worker["cap_drop"], ["ALL"])
                 self.assertIn("no-new-privileges:true", worker["security_opt"])
                 self.assertFalse(worker.get("ports"))
-                self.assertTrue(all(configuration["networks"][name]["internal"] for name in worker["networks"]))
+                self.assertEqual(set(worker["networks"]), {"edge", "database"})
+                self.assertFalse(configuration["networks"]["edge"].get("internal", False))
+                self.assertTrue(configuration["networks"]["database"]["internal"])
                 self.assertEqual(set(worker["environment"]), {"DATABASE_URL", "DATA_ROOT", "DOWNLOADS_DIR", "SHARE_DIR", "STUDIO_DIR"})
                 for target in ["/data/downloads", "/data/share"]:
                     mount = next(mount for mount in worker["volumes"] if mount["target"] == target)

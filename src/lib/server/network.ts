@@ -49,7 +49,7 @@ export function publicAddress(address: string): boolean {
 	return false;
 }
 
-async function publicDestination(source: string, signal?: AbortSignal) {
+export async function publicDestination(source: string, signal?: AbortSignal) {
 	let url: URL;
 	try { url = new URL(source); } catch { error(400, 'URL invalide.'); }
 	if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password ||

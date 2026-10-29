@@ -17,6 +17,7 @@
   let browserOpen = $state(false), entries = $state<Entry[]>([]), filesLoading = $state(false), filesTotal = $state(0);
   let space = $state<'downloads' | 'share'>('downloads'), folder = $state(''), offset = $state(0), search = $state('');
   let selectedJob = $state(''), thumbnailJob = $state(''), thumbnailTime = $state(0);
+  let dubbingUrl = $state(''), dubbingOffset = $state(0);
   let confirmOpen = $state(false);
   let confirmation = $state<'project' | 'job' | 'publish' | 'leave' | null>(null), targetJob = $state<StudioJob | null>(null), sharedName = $state('');
   let allowNavigation = false, leaveHref = '', alive = true, polling = false, fileRequest = 0;
@@ -129,7 +130,8 @@
     if ((kind === 'preview' || kind === 'export') && !(await save())) return;
     busy = true; error = ''; notice = '';
     try {
-      const { job } = await api<{ job: StudioJob }>(`/api/studio/${id}/jobs`, { method: 'POST', body: JSON.stringify({ kind, ...(source ? { source } : {}), ...(time !== undefined ? { time } : {}) }) });
+      if (kind === 'dub' && (!source || !dubbingUrl.trim() || !Number.isFinite(dubbingOffset) || Math.abs(dubbingOffset) > 600)) throw new Error($t.studio.dubInvalid);
+      const { job } = await api<{ job: StudioJob }>(`/api/studio/${id}/jobs`, { method: 'POST', body: JSON.stringify({ kind, ...(source ? { source } : {}), ...(time !== undefined ? { time } : {}), ...(kind === 'dub' ? { dubbing: { url: dubbingUrl.trim(), offset: dubbingOffset } } : {}) }) });
       jobs = [job, ...jobs];
       if (kind === 'probe') { pendingProbes.add(job.id); browserOpen = false; }
       if (kind === 'thumbnail') thumbnailJob = job.id;
@@ -162,7 +164,7 @@
     finally { busy = false; }
   }
   function ask(kind: 'project' | 'job' | 'publish', job: StudioJob | null = null) {
-    confirmation = kind; confirmOpen = true; targetJob = job; sharedName = `${(project?.name ?? 'clip').replace(/[\\/]/g, '-')}.mp4`;
+    confirmation = kind; confirmOpen = true; targetJob = job; sharedName = `${(project?.name ?? 'clip').replace(/[\\/]/g, '-')}${job?.kind === 'dub' ? '-fr.mkv' : '.mp4'}`;
   }
   async function confirm() {
     if (confirmation === 'leave') { allowNavigation = true; confirmation = null; confirmOpen = false; await goto(leaveHref); return; }
@@ -201,7 +203,7 @@
 <Notification bind:message={notice} />
 {#if loading}<p class="empty">{$t.loadingPage}</p>
 {:else if project}
-  <div class="studio-heading"><a class="quiet-button" href="/studio"><Icon name="chevron-left" />{$t.studio.projects}</a><span class="badge">{$t.studio.private}</span><span class={['badge', { bad: total > STUDIO_MAX_SECONDS }]}>{duration(total)} / 5 min</span></div>
+  <div class="studio-heading"><a class="quiet-button" href="/studio"><Icon name="chevron-left" />{$t.studio.projects}</a><span class="badge">{$t.studio.private}</span><span class={['badge', { bad: total > STUDIO_MAX_SECONDS }]}>{$t.studio.timeline}: {duration(total)} / 5 min</span></div>
   <section class="panel project-panel">
     <div class="toolbar">
       <label class="project-name">{$t.name}<input bind:value={project.name} maxlength="100" disabled={busy} /></label>
@@ -221,6 +223,19 @@
     {/each}</ol>
   </section>
   {#if selected}
+  <section class="panel render-panel" aria-labelledby="dubbing-title">
+    <h2 id="dubbing-title">{$t.studio.dub}</h2>
+    <p class="help">{$t.studio.dubHelp}</p>
+    <p class="help" style="overflow-wrap:anywhere">{$t.studio.source}: <strong>{selected.path}</strong></p>
+    <form onsubmit={(event) => { event.preventDefault(); if (selected) void createJob('dub', { space: selected.space, path: selected.path }); }}>
+      <fieldset disabled={busy}>
+        <label>{$t.studio.dubUrl}<input type="url" required maxlength="2048" bind:value={dubbingUrl} placeholder="https://www.youtube.com/watch?v=…" /></label>
+        <label>{$t.studio.dubOffset}<input type="number" required min="-600" max="600" step="0.001" bind:value={dubbingOffset} /></label>
+        <p class="help">{$t.studio.dubSync}</p>
+        <div><button class="primary" disabled={busy || !dubbingUrl.trim() || !Number.isFinite(dubbingOffset) || Math.abs(dubbingOffset) > 600}>{$t.studio.dubCreate}</button></div>
+      </fieldset>
+    </form>
+  </section>
   <section class="panel editor-panel">
     <h2 class="step-heading"><span>2</span>{$t.studio.trimStep}</h2>
     <p class="help">{$t.studio.trimHelp}</p>
@@ -284,7 +299,7 @@
       <video class="render-video" controls playsinline preload="metadata" src={jobUrl(currentRender, true)}><track kind="captions" />{$t.browserUnsupported}</video>
       <div class="render-actions"><a class="button primary" href={jobUrl(currentRender)}><Icon name="download" />{$t.download}</a>{#if currentRender.kind === 'export'}<button class="secondary" disabled={busy} onclick={() => ask('publish', currentRender)}>{$t.studio.publish}</button>{/if}</div>
     {/if}
-    <details class="job-history" open={activeJobs || jobs.some((job) => job.status === 'failed')}>
+    <details class="job-history" open={activeJobs || jobs.some((job) => job.status === 'failed' || (job.kind === 'dub' && job.status === 'completed'))}>
     <summary>{$t.studio.jobs}</summary>
     {#if !jobs.length}<p class="help">{$t.studio.noJobs}</p>{/if}
     <ul class="job-list">{#each jobs as job (job.id)}<li><div class="job-summary"><strong>{$t.studio[job.kind]}</strong><span class={['badge', { bad: job.status === 'failed' }]}>{$t.studio[job.status]}</span><time datetime={job.createdAt}>{new Date(job.createdAt).toLocaleString($language)}</time></div>
@@ -295,6 +310,7 @@
         {:else if job.status === 'completed'}
           {#if job.kind === 'probe' && job.result}<button class="quiet-button" disabled={busy || total >= STUDIO_MAX_SECONDS || project.clips.length >= 32} onclick={() => job.result && addMedia(job.result)}>{$t.studio.createClip}</button>
           {:else if job.kind === 'preview' || job.kind === 'export'}<button class="quiet-button" onclick={() => { selectedJob = job.id; }}>{$t.studio.watch}</button><a class="button secondary" href={jobUrl(job)}>{$t.download}</a>{#if job.kind === 'export'}<button class="quiet-button" disabled={busy} onclick={() => ask('publish', job)}>{$t.studio.publish}</button>{/if}
+          {:else if job.kind === 'dub'}<a class="button secondary" href={jobUrl(job)}>{$t.studio.dubDownload}</a><button class="quiet-button" disabled={busy} onclick={() => ask('publish', job)}>{$t.studio.publish}</button>
           {:else if job.kind === 'thumbnail'}<button class="quiet-button" onclick={() => { thumbnailJob = job.id; }}>{$t.studio.thumbnail}</button>{/if}
         {:else if job.kind === 'preview' || job.kind === 'export'}<button class="quiet-button" disabled={busy || !project.clips.length} onclick={() => createJob(job.kind)}>{$t.studio.retry}</button>{/if}
         {#if job.status !== 'queued' && job.status !== 'running'}<button class="icon-button danger" aria-label={$t.deleteShort} disabled={busy} onclick={() => ask('job', job)}><Icon name="trash" /></button>{/if}

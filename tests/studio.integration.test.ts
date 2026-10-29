@@ -107,6 +107,21 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('Studio with PostgreSQL', () => 
 		expect((await studio.ownedStudioProject(owner, created.id)).clips[0].title).toBe('Nouveau titre');
 		expect((await studio.ownedStudioJob(owner, created.id, job.id)).status).toBe('queued');
 	});
+	it('migrates the old job constraint and persists full-source dubbing without montage clips', async () => {
+		const project = await studio.createStudioProject(owner, 'Film français');
+		await db!.query('ALTER TABLE studio_jobs DROP CONSTRAINT studio_jobs_kind_check');
+		await db!.query("ALTER TABLE studio_jobs ADD CONSTRAINT studio_jobs_kind_check CHECK (kind IN ('probe','thumbnail','preview','export'))");
+		await db!.query(migration);
+		const job = await studio.createStudioJob(owner, project.id, { kind: 'dub', source: clip, dubbing: { url: 'https://youtu.be/abcdefghijk', offset: -2.5 } });
+		const { rows: [stored] } = await db!.query<{ input: StudioJobInput }>('SELECT input FROM studio_jobs WHERE id=$1', [job.id]);
+		expect(job).toMatchObject({ kind: 'dub', status: 'queued' });
+		expect(stored.input.project.clips).toEqual([]);
+		expect(stored.input.source).toEqual({ space: clip.space, path: clip.path });
+		expect(stored.input.fingerprint).toBe(clip.fingerprint);
+		expect(stored.input.dubbing).toEqual({ url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: -2.5 });
+		await db!.query(migration);
+		expect((await studio.ownedStudioJob(owner, project.id, job.id)).kind).toBe('dub');
+	});
 
 	it('rejects overlong edits and replaced sources without queueing an export', async () => {
 		const project = await studio.createStudioProject(owner, 'Limites');

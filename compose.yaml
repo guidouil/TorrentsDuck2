@@ -110,7 +110,7 @@ services:
       - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads:ro
       - ${DATA_ROOT:-/srv/torrentduck}/share:/data/share:ro
       - ${DATA_ROOT:-/srv/torrentduck}/studio:/data/studio
-    networks: [database]
+    networks: [edge, database]
     depends_on:
       postgres: { condition: service_healthy }
     user: 10000:10000

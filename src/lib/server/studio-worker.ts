@@ -6,7 +6,8 @@ import path from 'node:path';
 import type { PoolClient } from 'pg';
 import { isHttpError } from '@sveltejs/kit';
 import { db } from './db.js';
-import { requireStudioStorage, sourceFingerprint, studioFingerprint, studioJobDirectory, studioOutput, studioRoot, validateStudioEdit } from './studio.js';
+import { requireStudioStorage, sourceFingerprint, studioFingerprint, studioJobDirectory, studioOutput, studioRoot, validateStudioDubbing, validateStudioEdit } from './studio.js';
+import { STUDIO_AUDIO_MAX_BYTES, withYoutubeProxy } from './studio-youtube.js';
 import { parseStudioSrt, studioDuration } from '../studio.js';
 import type { StudioClip, StudioCue, StudioEdit, StudioJobInput, StudioJobKind, StudioMedia, StudioSource } from '../studio.js';
 
@@ -18,7 +19,7 @@ const inputArgs = ['-protocol_whitelist', 'fd', '-format_whitelist', formats, '-
 
 export type WorkerJob = { id: string; user_id: string; project_id: string; kind: StudioJobKind; input: StudioJobInput };
 type WorkContext = { signal: AbortSignal; progress?: (percent: number) => void };
-type ProbedMedia = StudioMedia & { videoIndex: number };
+type ProbedMedia = StudioMedia & { videoIndex: number; subtitleCodecs: string[] };
 
 class Cancelled extends Error {}
 
@@ -26,12 +27,12 @@ export function studioJobAllowed(row?: { cancel_requested: boolean; enabled: boo
 	return !!row && !row.cancel_requested && row.enabled && row.approved;
 }
 
-export async function runStudioProcess(command: string, args: string[], options: WorkContext & { fd?: number; capture?: boolean; timeout?: number; cwd?: string }): Promise<string> {
+export async function runStudioProcess(command: string, args: string[], options: WorkContext & { fd?: number; fds?: number[]; capture?: boolean; timeout?: number; cwd?: string }): Promise<string> {
 	options.signal.throwIfAborted();
 	return new Promise((resolve, reject) => {
 		const child = spawn(command, args, {
 			cwd: options.cwd,
-			stdio: ['ignore', 'pipe', 'pipe', options.fd ?? 'ignore'],
+			stdio: ['ignore', 'pipe', 'pipe', ...(options.fds ?? [options.fd ?? ('ignore' as const)])],
 			detached: process.platform !== 'win32',
 			env: { PATH: process.env.PATH, LANG: 'C.UTF-8', HOME: '/tmp' }
 		});
@@ -69,13 +70,13 @@ export async function runStudioProcess(command: string, args: string[], options:
 		});
 		// Consume diagnostics without exposing paths, metadata or unbounded output in logs.
 		child.stderr?.resume();
-		child.on('error', () => { failure ??= new Error(`${command === 'ffprobe' ? 'FFprobe' : 'FFmpeg'} indisponible.`); });
+		child.on('error', () => { failure ??= new Error(`${command === 'yt-dlp' ? 'yt-dlp' : command === 'ffprobe' ? 'FFprobe' : 'FFmpeg'} indisponible.`); });
 		child.on('close', (code) => {
 			clearTimeout(timeout);
 			clearTimeout(killTimer);
 			options.signal.removeEventListener('abort', abort);
 			if (failure) reject(failure);
-			else if (code !== 0) reject(new Error('Média non pris en charge ou traitement vidéo impossible.'));
+			else if (code !== 0) reject(new Error(command === 'yt-dlp' ? 'Bande son YouTube inaccessible. Vérifiez le lien et mettez yt-dlp à jour si nécessaire.' : 'Média non pris en charge ou traitement vidéo impossible.'));
 			else resolve(output);
 		});
 		if (options.signal.aborted) abort();
@@ -98,7 +99,7 @@ async function withSource<T>(source: StudioSource, expected: string, work: (hand
 }
 
 export function studioMetadata(source: StudioSource, fingerprint: string, data: unknown): ProbedMedia {
-	const probe = data as { streams?: { index: number; codec_type: string; width?: number; height?: number; duration?: string; disposition?: { attached_pic?: number }; tags?: Record<string, string>; side_data_list?: { rotation?: number }[] }[]; format?: { duration?: string } };
+	const probe = data as { streams?: { index: number; codec_type: string; codec_name?: string; width?: number; height?: number; duration?: string; disposition?: { attached_pic?: number }; tags?: Record<string, string>; side_data_list?: { rotation?: number }[] }[]; format?: { duration?: string } };
 	if (!probe || !Array.isArray(probe.streams)) throw new Error('Métadonnées vidéo invalides.');
 	const video = probe.streams.find((stream) => stream.codec_type === 'video' && !stream.disposition?.attached_pic);
 	const duration = Number(probe.format?.duration ?? video?.duration);
@@ -110,6 +111,7 @@ export function studioMetadata(source: StudioSource, fingerprint: string, data: 
 	return {
 		...source, fingerprint, duration, width: rotated ? video.height : video.width, height: rotated ? video.width : video.height,
 		videoIndex: video.index,
+		subtitleCodecs: probe.streams.filter((stream) => stream.codec_type === 'subtitle').map((stream) => stream.codec_name ?? ''),
 		audio: probe.streams.filter((stream) => stream.codec_type === 'audio' && Number.isInteger(stream.index)).map((stream) => ({
 			index: stream.index, label: [stream.tags?.language, stream.tags?.title].filter(Boolean).join(' · ').slice(0, 160) || `Audio ${stream.index}`
 		}))
@@ -120,7 +122,7 @@ async function inspectSource(source: StudioSource, fingerprint: string, context:
 	return withSource(source, fingerprint, async (handle) => {
 		const output = await runStudioProcess('ffprobe', [
 			'-v', 'error', '-threads', '1', ...inputArgs,
-			'-show_entries', 'format=duration:stream=index,codec_type,width,height,duration:stream_tags=language,title,rotate:stream_side_data=rotation:stream_disposition=attached_pic',
+			'-show_entries', 'format=duration:stream=index,codec_type,codec_name,width,height,duration:stream_tags=language,title,rotate:stream_side_data=rotation:stream_disposition=attached_pic',
 			'-of', 'json'
 		], { ...context, fd: handle.fd, capture: true, timeout: 30_000 });
 		return studioMetadata(source, fingerprint, JSON.parse(output));
@@ -172,15 +174,88 @@ async function cleanDirectory(directory: string, keep?: string) {
 	}
 }
 
+async function dubStudioVideo(job: WorkerJob, directory: string, context: WorkContext) {
+	if (!job.input.source || !job.input.fingerprint) throw new Error('Source requise.');
+	const { source, fingerprint } = job.input;
+	const dubbing = validateStudioDubbing(job.input.dubbing);
+	const media = await inspectSource(source, fingerprint, context);
+	if (media.duration > 86400) throw new Error('La vidéo ne peut pas dépasser 24 heures.');
+	const downloaded = path.join(directory, 'audio.download');
+	await withYoutubeProxy(context.signal, (proxy, signal) => runStudioProcess('yt-dlp', [
+		'--ignore-config', '--no-plugin-dirs', '--no-js-runtimes', '--js-runtimes', 'node', '--no-remote-components',
+		'--use-extractors', 'youtube', '--no-playlist', '--no-cache-dir', '--no-part', '--no-overwrites', '--no-warnings',
+		'--downloader', 'native', '--fixup', 'never', '--socket-timeout', '20', '--retries', '2', '--fragment-retries', '2',
+		'--match-filter', '!is_live & !is_upcoming & duration <= 86400', '--max-filesize', String(STUDIO_AUDIO_MAX_BYTES),
+		'--format', 'bestaudio[language^=fr][protocol=https]/bestaudio[protocol=https]',
+		'--proxy', proxy, '--output', downloaded, '--', dubbing.url
+	], { ...context, signal, cwd: directory, timeout: 1_800_000 }));
+	context.signal.throwIfAborted();
+	context.progress?.(20);
+	let audio = await open(downloaded, constants.O_RDONLY | constants.O_NOFOLLOW);
+	const partial = path.join(directory, 'dub.partial.mkv');
+	try {
+		const stat = await audio.stat();
+		if (!stat.isFile() || stat.size === 0 || stat.size > STUDIO_AUDIO_MAX_BYTES) throw new Error('Bande son YouTube absente ou trop volumineuse.');
+		await requireStudioStorage();
+		const metadata = JSON.parse(await runStudioProcess('ffprobe', [
+			'-v', 'error', '-threads', '1', ...inputArgs, '-show_entries', 'format=duration:stream=codec_type', '-of', 'json'
+		], { ...context, fd: audio.fd, capture: true, timeout: 30_000 }));
+		const audioDuration = Number(metadata.format?.duration);
+		if (!metadata.streams?.some((stream: { codec_type: string }) => stream.codec_type === 'audio') || !Number.isFinite(audioDuration) || audioDuration <= Math.max(0, -dubbing.offset) || dubbing.offset >= media.duration) {
+			throw new Error('Bande son ou décalage audio invalide.');
+		}
+		// ffprobe advances the inherited descriptor; the second FFmpeg input must start at byte zero.
+		await audio.close();
+		audio = await open(downloaded, constants.O_RDONLY | constants.O_NOFOLLOW);
+		const french = media.audio.length;
+		const filter = `atrim=start=${Math.max(0, -dubbing.offset)},asetpts=PTS-STARTPTS,adelay=${Math.round(Math.max(0, dubbing.offset) * 1000)}:all=1,apad,atrim=duration=${media.duration}`;
+		await withSource(source, fingerprint, async (handle) => {
+			await requireStudioStorage((await handle.stat()).size + Math.ceil(media.duration * 25000));
+			return runStudioProcess('ffmpeg', [
+				...baseArgs, ...inputArgs,
+				'-protocol_whitelist', 'fd', '-format_whitelist', formats, '-max_streams', '8', '-fd', '4', '-i', 'fd:',
+				'-map', `0:${media.videoIndex}`, '-map', '0:a?', '-map', '1:a:0', '-map', '0:s?', '-map', '0:t?', '-c', 'copy',
+				...media.subtitleCodecs.flatMap((codec, index) => codec === 'mov_text' ? [`-c:s:${index}`, 'srt'] : []),
+				`-c:a:${french}`, 'aac', `-b:a:${french}`, '192k', `-filter:a:${french}`, filter,
+				'-disposition:a', '0', `-disposition:a:${french}`, 'default', `-metadata:s:a:${french}`, 'language=fra', `-metadata:s:a:${french}`, 'title=Français',
+				'-t', String(media.duration), '-progress', 'pipe:1', '-f', 'matroska', partial
+			], { ...context, fds: [handle.fd, audio.fd], progress: (seconds) => context.progress?.(20 + Math.min(75, seconds / media.duration * 75)) });
+		});
+	} finally { await audio.close(); }
+	const rendered = await open(partial, constants.O_RDONLY | constants.O_NOFOLLOW);
+	try {
+		const metadata = JSON.parse(await runStudioProcess('ffprobe', [
+			'-v', 'error', '-threads', '1', ...inputArgs, '-show_entries', 'format=duration:stream=codec_type,width,height:stream_tags=language:stream_disposition=default', '-of', 'json'
+		], { ...context, fd: rendered.fd, capture: true, timeout: 30_000 }));
+		const duration = Number(metadata.format?.duration);
+		const video = metadata.streams?.find((stream: { codec_type: string }) => stream.codec_type === 'video');
+		const audioTracks = metadata.streams?.filter((stream: { codec_type: string }) => stream.codec_type === 'audio');
+		if ((await rendered.stat()).size === 0 || !Number.isFinite(duration) || Math.abs(duration - media.duration) > 0.25 || !video || audioTracks?.length !== media.audio.length + 1 || audioTracks.at(-1)?.tags?.language !== 'fra' || audioTracks.at(-1)?.disposition?.default !== 1) {
+			throw new Error('Film incomplet ou piste française absente.');
+		}
+	} finally { await rendered.close(); }
+	if ((await sourceFingerprint(source)).fingerprint !== fingerprint) throw new Error('La source a changé pendant le traitement.');
+	context.signal.throwIfAborted();
+	await requireStudioStorage();
+	const output = await studioOutput(job.id, job.kind);
+	await rename(partial, output);
+	await chmod(output, 0o644);
+	await cleanDirectory(directory, path.basename(output));
+}
+
 export async function runStudioJob(job: WorkerJob, context: WorkContext): Promise<StudioMedia | null> {
 	const directory = await studioJobDirectory(job.id);
 	await cleanDirectory(directory);
 	await requireStudioStorage();
+	if (job.kind === 'dub') {
+		await dubStudioVideo(job, directory, context);
+		return null;
+	}
 	if (job.kind === 'probe' || job.kind === 'thumbnail') {
 		if (!job.input.source || !job.input.fingerprint) throw new Error('Source requise.');
 		const media = await inspectSource(job.input.source, job.input.fingerprint, context);
 		if (job.kind === 'probe') {
-			const { videoIndex: _, ...publicMedia } = media;
+			const { videoIndex: _, subtitleCodecs: __, ...publicMedia } = media;
 			return publicMedia;
 		}
 		const output = await studioOutput(job.id, job.kind);

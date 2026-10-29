@@ -14,7 +14,11 @@ COPY --from=build /app/package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 FROM runtime AS studio
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg fonts-dejavu-core python3-venv \
+    && python3 -m venv /opt/yt-dlp \
+    && /opt/yt-dlp/bin/pip install --no-cache-dir 'yt-dlp[default]==2026.10.26' \
+    && ln -s /opt/yt-dlp/bin/yt-dlp /usr/local/bin/yt-dlp \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/src/lib ./src/lib
 COPY --from=build /app/scripts ./scripts
 USER 10000:10000

@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS studio_jobs (
   id text PRIMARY KEY DEFAULT gen_random_uuid()::text,
   project_id text NOT NULL REFERENCES studio_projects(id) ON DELETE CASCADE,
   user_id text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
-  kind text NOT NULL CHECK (kind IN ('probe', 'thumbnail', 'preview', 'export')),
+  kind text NOT NULL CHECK (kind IN ('probe', 'thumbnail', 'preview', 'export', 'dub')),
   status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
   input jsonb NOT NULL,
   result jsonb,
@@ -154,6 +154,8 @@ CREATE TABLE IF NOT EXISTS studio_jobs (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE studio_jobs DROP CONSTRAINT IF EXISTS studio_jobs_kind_check;
+ALTER TABLE studio_jobs ADD CONSTRAINT studio_jobs_kind_check CHECK (kind IN ('probe', 'thumbnail', 'preview', 'export', 'dub'));
 CREATE INDEX IF NOT EXISTS studio_jobs_queue ON studio_jobs (created_at, id) WHERE status='queued';
 CREATE INDEX IF NOT EXISTS studio_jobs_user ON studio_jobs (user_id, project_id);
 COMMIT;

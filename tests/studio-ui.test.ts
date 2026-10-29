@@ -26,11 +26,12 @@ function editor(api = vi.fn()) {
     .replace('const selected = $derived(project?.clips[selectedIndex]);', "Object.defineProperty(globalThis, 'selected', { get: () => project?.clips[selectedIndex] });")
     .replace('const total = $derived(project ? studioDuration(project.clips) : 0);', "Object.defineProperty(globalThis, 'total', { get: () => project ? studioDuration(project.clips) : 0 });");
   runInNewContext(transpile(`${script}\nglobalThis.editor = {
-    refresh, addMedia, moveClip, removeClip, createJob, importSrt, cancelJob, isVideo,
+    refresh, addMedia, moveClip, removeClip, createJob, importSrt, cancelJob, isVideo, ask, confirm,
     fileUrl, timecode, seek, playClip, updatePlayback, finishSeeking, selectClip, setBoundary,
     setup: (value, tasks = []) => { project = value; jobs = tasks; baseline = JSON.stringify(edit(value)); },
     playback: (element, length = 600) => { video = element; sourceDuration = length; playhead = element.currentTime; },
-    state: () => ({ project, jobs, selectedIndex, error, busy, previewingClip, selectedJob })
+    dubbing: (url, offset) => { dubbingUrl = url; dubbingOffset = offset; },
+    state: () => ({ project, jobs, selectedIndex, error, busy, previewingClip, selectedJob, confirmation, sharedName })
   };`), context);
   context.editor.setup(structuredClone(project));
   return { api, ...context.editor };
@@ -114,6 +115,42 @@ describe('studio editing', () => {
     expect(rejectedInput.value).toBe('');
     expect(ui.state().project.subtitles).toBe(valid);
     expect(ui.state().error).toBe(get(t).studio.srtInvalid);
+  });
+});
+
+describe('studio French soundtrack', () => {
+  it('queues the whole source and an offset without saving montage edits or applying clip bounds', async () => {
+    const job = { id: 'dub', kind: 'dub', status: 'queued' };
+    const ui = editor(vi.fn().mockResolvedValue({ job }));
+    ui.setup({ ...structuredClone(project), clips: [{ ...clip, start: 150, end: 550 }] });
+    ui.dubbing(' https://youtu.be/abcdefghijk ', -2.25);
+    await ui.createJob('dub', { space: clip.space, path: clip.path });
+    expect(ui.api).toHaveBeenCalledExactlyOnceWith('/api/studio/project/jobs', {
+      method: 'POST', body: JSON.stringify({ kind: 'dub', source: { space: clip.space, path: clip.path }, dubbing: { url: 'https://youtu.be/abcdefghijk', offset: -2.25 } })
+    });
+    expect(ui.state().jobs).toEqual([job]);
+    expect(ui.state().selectedJob).toBe('');
+    expect(ui.state().project.clips[0]).toMatchObject({ start: 150, end: 550 });
+  });
+
+  it.each([NaN, 601, -601])('refuses invalid offsets before requesting work (%s)', async (offset) => {
+    const ui = editor();
+    ui.dubbing('https://youtu.be/abcdefghijk', offset);
+    await ui.createJob('dub', { space: clip.space, path: clip.path });
+    expect(ui.api).not.toHaveBeenCalled();
+    expect(ui.state().error).toBe(get(t).studio.dubInvalid);
+    expect(ui.state().busy).toBe(false);
+  });
+
+  it('uses an MKV name and waits for confirmation before publishing the French copy', async () => {
+    const ui = editor(vi.fn().mockResolvedValue({ path: 'Private montage-fr.mkv' }));
+    ui.ask('publish', { id: 'dub', kind: 'dub', status: 'completed' });
+    expect(ui.api).not.toHaveBeenCalled();
+    expect(ui.state()).toMatchObject({ confirmation: 'publish', sharedName: 'Private montage-fr.mkv' });
+    await ui.confirm();
+    expect(ui.api).toHaveBeenCalledExactlyOnceWith('/api/studio/project/jobs/dub/publish', {
+      method: 'POST', body: JSON.stringify({ name: 'Private montage-fr.mkv', confirm: true })
+    });
   });
 });
 

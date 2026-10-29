@@ -278,23 +278,28 @@ still use simulated responses.
 
 Studio assembles a single video track from existing `downloads` and `share` files, limited to **300 seconds in total**. It preserves sources and supports 16:9 and 9:16, manual cropping, the original audio track, titles and SRT imports. SRT timecodes refer to the final montage; text and timecodes can be edited before burning subtitles into the image. Exports are H.264/AAC MP4 files in 1080p. Low-resolution previews of selected passages are prepared on demand, without automatically converting a whole film. Automatic transcription and direct YouTube/TikTok publishing are excluded.
 
-The `studio` service uses the Docker target of the same name, including FFmpeg, libass and DejaVu Sans. It processes one task at a time with initial limits of **4 GiB RAM and 1 CPU**, without GPU or published ports, on the internal PostgreSQL network only. Its `downloads` and `share` mounts are read-only. Tasks persist in PostgreSQL: queued tasks survive restarts, while an interrupted render is marked failed and can be restarted. Each render uses the montage version saved when it was launched.
+To add French audio to a whole film, choose its source in Studio, paste the public YouTube URL into the French audio section and start the task. The new MKV copies the video without re-encoding and retains the original audio tracks; French becomes the default track. This operation uses the whole file, independently of the montage and its five-minute limit. Adjust the offset from −600 to +600 seconds: positive values delay French audio and negative values advance it. Both copies must use the same cut: this cannot repair missing scenes or gradual drift. The MKV stays private and can be downloaded for VLC playback; publishing it into `share` requires the usual confirmation.
+
+The `studio` service uses the Docker target of the same name, including FFmpeg, libass, DejaVu Sans, Python and [yt-dlp 2026.10.26](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26). The `yt-dlp[default]` package supplies the EJS scripts used with Node 24, without downloading additional code during tasks. It processes one task at a time with initial limits of **4 GiB RAM and 1 CPU**, without GPU or published ports. It uses the internal PostgreSQL network and `edge` for outbound HTTPS to YouTube; the worker's local proxy restricts destinations to allowed YouTube/CDN domains, with DNS validation and a pinned public address. Its `downloads` and `share` mounts are read-only. Tasks persist in PostgreSQL: queued tasks survive restarts, while an interrupted render is marked failed and can be restarted. Each render uses the montage version saved when it was launched.
+
+Only public YouTube videos accessible without an account are supported, without cookies, sign-in, restriction bypasses or DRM. Live and upcoming streams are rejected. Videos are limited to 24 hours, total YouTube transfer to 1 GiB, downloading to 30 minutes and the complete task to one hour. Unavailable, region/age-restricted or YouTube-blocked videos fail the task. YouTube changes may require updating the pinned yt-dlp version in `Dockerfile` and rebuilding the `studio` image; the read-only container does not update itself.
 
 The host's `DATA_ROOT/studio` directory is mounted at `/data/studio` (`STUDIO_DIR`) in `web` and `studio`, and read-only in Nginx. FTPS has no mount of this directory. Deployment creates it with owner `10000:10000` and mode `0755`, without modifying sources. API checks on ownership and account state keep files private; the Nginx `/_protected/studio/` location is strictly internal. Explicit confirmation publishes a complete, non-overwriting copy into `share`, making it collective under that space's existing deletion rules.
 
-Allow space for previews, intermediate files and exports. The 10% reserve is checked on the filesystem containing `STUDIO_DIR`, including during processing. Errors and cancellations clean up partial files; finished exports can be deleted from Studio. Sources must remain present and unchanged during a render: deletion, replacement or modification fails the task without publishing its result.
+Allow space for previews, intermediate files and exports; adding a soundtrack needs the downloaded audio and a new complete copy of the film. Publishing to `share` creates another complete copy. The 10% reserve is checked on the filesystem containing `STUDIO_DIR`, including during processing. Errors and cancellations clean up partial files; finished exports can be deleted from Studio. Sources must remain present and unchanged during a render: deletion, replacement or modification fails the task without publishing its result.
 
 After updating, check the service and export a one-minute test montage in horizontal and vertical formats, including a title and subtitles:
 
 ```sh
 sudo docker compose ps studio
 sudo docker compose exec -T studio ffmpeg -version
+sudo docker compose exec -T studio yt-dlp --version
 sudo docker compose logs --tail=100 studio
 ```
 
 Measure actual render time, CPU load on Transfers and disk usage before increasing limits or concurrency. On a test instance, check a format unsupported by the browser, cancellation, worker restart and the disk reserve. With two accounts, verify that a project and its private export are inaccessible to the other account, then that only the explicitly published copy appears in `share` and FTPS. Also verify that disabling an account revokes access and stops its running task.
 
-Projects, subtitles and tasks are included in PostgreSQL backups. Private previews, intermediates and exports in `DATA_ROOT/studio` are excluded from automatic SSH and FTP backups; they can be regenerated while their sources remain available and unchanged. Copies published into `share` follow that space's existing backup policy. Old exports may therefore be absent after restoration and require another render.
+Projects, subtitles and tasks are included in PostgreSQL backups. Private previews, intermediates and exports in `DATA_ROOT/studio` are excluded from automatic SSH and FTP backups; they can be regenerated while their sources remain available and unchanged, including the YouTube video for French soundtracks. Copies published into `share` follow that space's existing backup policy. Old exports may therefore be absent after restoration and require another render.
 
 ## Operations, certificates and backups
 
@@ -372,6 +377,8 @@ For later updates, run `~/deploy-torrentduck.sh`, **without sudo before the scri
 Administrator deletion in `downloads` requires this full update to rebuild the images and recreate the `web` and `ftp` containers with their new mounts; restarting alone is insufficient.
 
 Studio also requires this full update: PostgreSQL schema, the new `studio` image, private directory initialization and new mounts in `web` and Nginx. Preserve the same `DATA_ROOT`; no new secret is required.
+
+YouTube soundtracks require the same full procedure to apply the new database job type, install yt-dlp and recreate `studio` with outbound network access. Restarting the old image is insufficient; no new variable or published port is needed.
 
 Cleanup runs before building and on exit, including failures: only untagged project images that are no longer used by any container are removed. Unused build cache in the default Docker builder is reduced with `--keep-storage 1GB`; this cache is shared with any other projects on the host. The script requires at least 10% free plus 5 GiB on the Docker filesystem before building. It creates no archive or backup image tag and removes no volume, shared file, download or existing backup. Output stays in the terminal.
 
