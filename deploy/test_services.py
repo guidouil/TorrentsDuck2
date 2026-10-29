@@ -212,7 +212,7 @@ esac
 
     @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
     def test_qbt_peer_port_matches_published_tcp_and_udp_ports(self):
-        for value, expected in [("", "42420"), ("58473", "58473")]:
+        for value, expected in [("", "55555"), ("58473", "58473")]:
             with self.subTest(value=value):
                 result = subprocess.run(
                     ["docker", "compose", "--env-file", ".env.example", "config", "--format", "json"],
