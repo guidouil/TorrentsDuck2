@@ -112,6 +112,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('Studio with PostgreSQL', () => 
 		await db!.query('ALTER TABLE studio_jobs DROP CONSTRAINT studio_jobs_kind_check');
 		await db!.query("ALTER TABLE studio_jobs ADD CONSTRAINT studio_jobs_kind_check CHECK (kind IN ('probe','thumbnail','preview','export'))");
 		await db!.query(migration);
+		const audio = await studio.createStudioJob(owner, project.id, { kind: 'dub-audio', dubbing: { url: 'https://youtu.be/abcdefghijk', offset: 0 } });
+		expect(audio).toMatchObject({ kind: 'dub-audio', status: 'queued', dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: 0 } });
 		const job = await studio.createStudioJob(owner, project.id, { kind: 'dub', source: clip, dubbing: { url: 'https://youtu.be/abcdefghijk', offset: -2.5 } });
 		const { rows: [stored] } = await db!.query<{ input: StudioJobInput }>('SELECT input FROM studio_jobs WHERE id=$1', [job.id]);
 		expect(job).toMatchObject({ kind: 'dub', status: 'queued' });

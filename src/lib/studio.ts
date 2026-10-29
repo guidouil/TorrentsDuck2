@@ -9,13 +9,14 @@ export type StudioMedia = StudioSource & {
 	duration: number; width: number; height: number; fingerprint: string;
 	audio: { index: number; label: string }[];
 };
-export type StudioJobKind = 'probe' | 'thumbnail' | 'preview' | 'export' | 'dub';
+export type StudioJobKind = 'probe' | 'thumbnail' | 'preview' | 'export' | 'dub-audio' | 'dub';
 export type StudioJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type StudioJob = {
 	id: string; projectId: string; kind: StudioJobKind; status: StudioJobStatus; progress: number;
 	error: string | null; result: StudioMedia | null; createdAt: string; updatedAt: string;
+	dubbing?: StudioDubbing | null;
 };
-export type StudioDubbing = { url: string; offset: number };
+export type StudioDubbing = { url: string; offset: number; audioJobId?: string };
 export type StudioJobInput = { project: StudioEdit; source?: StudioSource; fingerprint?: string; time?: number; dubbing?: StudioDubbing };
 export type StudioCue = { start: number; end: number; text: string };
 

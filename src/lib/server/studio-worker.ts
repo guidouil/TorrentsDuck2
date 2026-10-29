@@ -174,12 +174,7 @@ async function cleanDirectory(directory: string, keep?: string) {
 	}
 }
 
-async function dubStudioVideo(job: WorkerJob, directory: string, context: WorkContext) {
-	if (!job.input.source || !job.input.fingerprint) throw new Error('Source requise.');
-	const { source, fingerprint } = job.input;
-	const dubbing = validateStudioDubbing(job.input.dubbing);
-	const media = await inspectSource(source, fingerprint, context);
-	if (media.duration > 86400) throw new Error('La vidéo ne peut pas dépasser 24 heures.');
+async function downloadStudioAudio(url: string, directory: string, context: WorkContext) {
 	const downloaded = path.join(directory, 'audio.download');
 	await withYoutubeProxy(context.signal, (proxy, signal) => runStudioProcess('yt-dlp', [
 		'--ignore-config', '--no-plugin-dirs', '--no-js-runtimes', '--js-runtimes', 'node', '--no-remote-components',
@@ -187,21 +182,69 @@ async function dubStudioVideo(job: WorkerJob, directory: string, context: WorkCo
 		'--downloader', 'native', '--fixup', 'never', '--socket-timeout', '20', '--retries', '2', '--fragment-retries', '2',
 		'--match-filter', '!is_live & !is_upcoming & duration <= 86400', '--max-filesize', String(STUDIO_AUDIO_MAX_BYTES),
 		'--format', 'bestaudio[language^=fr][protocol=https]/bestaudio[protocol=https]',
-		'--proxy', proxy, '--output', downloaded, '--', dubbing.url
+		'--proxy', proxy, '--output', downloaded, '--', url
 	], { ...context, signal, cwd: directory, timeout: 1_800_000 }));
 	context.signal.throwIfAborted();
 	context.progress?.(20);
+	return downloaded;
+}
+
+async function inspectStudioAudio(audio: FileHandle, context: WorkContext, maxBytes = STUDIO_AUDIO_MAX_BYTES) {
+	const stat = await audio.stat();
+	if (!stat.isFile() || stat.size === 0 || stat.size > maxBytes) throw new Error('Bande son YouTube absente ou trop volumineuse.');
+	const metadata = JSON.parse(await runStudioProcess('ffprobe', [
+		'-v', 'error', '-threads', '1', ...inputArgs, '-show_entries', 'format=duration:stream=codec_type', '-of', 'json'
+	], { ...context, fd: audio.fd, capture: true, timeout: 30_000 }));
+	const duration = Number(metadata.format?.duration);
+	if (!metadata.streams?.some((stream: { codec_type: string }) => stream.codec_type === 'audio') || !Number.isFinite(duration) || duration <= 0 || duration > 86400) {
+		throw new Error('Bande son ou durée audio invalide.');
+	}
+	return duration;
+}
+
+async function prepareStudioAudio(job: WorkerJob, directory: string, context: WorkContext) {
+	const dubbing = validateStudioDubbing(job.input.dubbing);
+	const downloaded = await downloadStudioAudio(dubbing.url, directory, context);
+	let audio = await open(downloaded, constants.O_RDONLY | constants.O_NOFOLLOW);
+	const partial = path.join(directory, 'audio.partial.m4a');
+	let duration = 0;
+	try {
+		duration = await inspectStudioAudio(audio, context);
+		await requireStudioStorage(Math.ceil(duration * 25000));
+		// FFprobe consumes the inherited descriptor; reopen it before decoding.
+		await audio.close();
+		audio = await open(downloaded, constants.O_RDONLY | constants.O_NOFOLLOW);
+		await runStudioProcess('ffmpeg', [
+			...baseArgs, ...inputArgs, '-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
+			'-map_metadata', '-1', '-map_chapters', '-1', '-movflags', '+faststart', '-progress', 'pipe:1', '-f', 'mp4', partial
+		], { ...context, fd: audio.fd, progress: (seconds) => context.progress?.(20 + Math.min(75, seconds / duration * 75)) });
+	} finally { await audio.close(); }
+	const prepared = await open(partial, constants.O_RDONLY | constants.O_NOFOLLOW);
+	try {
+		if (Math.abs(await inspectStudioAudio(prepared, context, STUDIO_AUDIO_MAX_BYTES * 3) - duration) > 0.15) throw new Error('Bande son préparée incomplète.');
+	}
+	finally { await prepared.close(); }
+	context.signal.throwIfAborted();
+	await requireStudioStorage();
+	const output = await studioOutput(job.id, job.kind);
+	await rename(partial, output);
+	await chmod(output, 0o644);
+	await cleanDirectory(directory, path.basename(output));
+}
+
+async function dubStudioVideo(job: WorkerJob, directory: string, context: WorkContext) {
+	if (!job.input.source || !job.input.fingerprint) throw new Error('Source requise.');
+	const { source, fingerprint } = job.input;
+	const dubbing = validateStudioDubbing(job.input.dubbing);
+	const media = await inspectSource(source, fingerprint, context);
+	if (media.duration > 86400) throw new Error('La vidéo ne peut pas dépasser 24 heures.');
+	const downloaded = dubbing.audioJobId ? path.join(directory, 'audio.m4a') : await downloadStudioAudio(dubbing.url, directory, context);
 	let audio = await open(downloaded, constants.O_RDONLY | constants.O_NOFOLLOW);
 	const partial = path.join(directory, 'dub.partial.mkv');
 	try {
-		const stat = await audio.stat();
-		if (!stat.isFile() || stat.size === 0 || stat.size > STUDIO_AUDIO_MAX_BYTES) throw new Error('Bande son YouTube absente ou trop volumineuse.');
 		await requireStudioStorage();
-		const metadata = JSON.parse(await runStudioProcess('ffprobe', [
-			'-v', 'error', '-threads', '1', ...inputArgs, '-show_entries', 'format=duration:stream=codec_type', '-of', 'json'
-		], { ...context, fd: audio.fd, capture: true, timeout: 30_000 }));
-		const audioDuration = Number(metadata.format?.duration);
-		if (!metadata.streams?.some((stream: { codec_type: string }) => stream.codec_type === 'audio') || !Number.isFinite(audioDuration) || audioDuration <= Math.max(0, -dubbing.offset) || dubbing.offset >= media.duration) {
+		const audioDuration = await inspectStudioAudio(audio, context, STUDIO_AUDIO_MAX_BYTES * (dubbing.audioJobId ? 3 : 1));
+		if (audioDuration <= Math.max(0, -dubbing.offset) || dubbing.offset >= media.duration) {
 			throw new Error('Bande son ou décalage audio invalide.');
 		}
 		// ffprobe advances the inherited descriptor; the second FFmpeg input must start at byte zero.
@@ -245,8 +288,12 @@ async function dubStudioVideo(job: WorkerJob, directory: string, context: WorkCo
 
 export async function runStudioJob(job: WorkerJob, context: WorkContext): Promise<StudioMedia | null> {
 	const directory = await studioJobDirectory(job.id);
-	await cleanDirectory(directory);
+	await cleanDirectory(directory, job.kind === 'dub' && job.input.dubbing?.audioJobId ? 'audio.m4a' : undefined);
 	await requireStudioStorage();
+	if (job.kind === 'dub-audio') {
+		await prepareStudioAudio(job, directory, context);
+		return null;
+	}
 	if (job.kind === 'dub') {
 		await dubStudioVideo(job, directory, context);
 		return null;

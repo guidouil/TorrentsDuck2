@@ -70,7 +70,8 @@ describe('Studio YouTube dubbing validation', () => {
 		{ url: 'https://youtu.be/abcdefghijk/extra', offset: 0 },
 		{ url: 'https://youtu.be/abcdefghijk', offset: '0' },
 		{ url: 'https://youtu.be/abcdefghijk', offset: NaN },
-		{ url: 'https://youtu.be/abcdefghijk', offset: 601 }
+		{ url: 'https://youtu.be/abcdefghijk', offset: 601 },
+		{ url: 'https://youtu.be/abcdefghijk', offset: 0, audioJobId: '../private' }
 	])('rejects unsafe links and invalid offsets (%j)', (input) => {
 		expect(() => validateStudioDubbing(input)).toThrow();
 	});
@@ -136,6 +137,19 @@ describe('private Studio files and sources', () => {
 		expect(await readFile(path.join(root, 'share', 'Film FR.mkv'), 'utf8')).toBe('dubbed movie');
 		await expect(publishStudioJob('owner', id, jobId, { name: 'Film FR.mkv', confirm: true })).rejects.toMatchObject({ status: 409 });
 	});
+	it('streams prepared private audio with its MIME type, Range and internal delivery', async () => {
+		mocked.query.mockResolvedValue([{ ...completed, kind: 'dub-audio' }]);
+		await writeFile(await studioOutput(jobId, 'dub-audio'), '0123456789');
+		const url = new URL('http://localhost/api/studio/file?inline=1');
+		const response = await studioFile({ url, request: new Request(url, { headers: { range: 'bytes=2-4' } }) } as RequestEvent, 'owner', id, jobId);
+		expect(response.status).toBe(206);
+		expect(response.headers.get('content-type')).toBe('audio/mp4');
+		expect(await response.text()).toBe('234');
+		vi.stubEnv('FILE_DELIVERY', 'nginx');
+		const nginx = await studioFile({ url, request: new Request(url) } as RequestEvent, 'owner', id, jobId);
+		expect(nginx.headers.get('x-accel-redirect')).toBe(`/_protected/studio/${jobId}/output.m4a`);
+		await expect(publishStudioJob('owner', id, jobId, { name: 'audio.m4a', confirm: true })).rejects.toMatchObject({ status: 400 });
+	});
 	it('requires explicit collective publication and completed-output deletion confirmation', async () => {
 		await expect(publishStudioJob('owner', id, jobId, { name: 'x.mp4' })).rejects.toMatchObject({ status: 400 });
 		mocked.query.mockResolvedValue([completed]);
@@ -173,5 +187,47 @@ describe('private Studio files and sources', () => {
 		mocked.clientQuery.mockClear();
 		await expect(createStudioJob('owner', id, { kind: 'dub', source, dubbing: { url: 'https://private.test/', offset: 0 } })).rejects.toMatchObject({ status: 400 });
 		expect(mocked.clientQuery).not.toHaveBeenCalled();
+	});
+	it('queues YouTube audio preparation before any source has been selected', async () => {
+		mocked.query.mockResolvedValue([{ id, edit: { ...edit(), clips: [] }, createdAt: new Date(), updatedAt: new Date() }]);
+		mocked.clientQuery.mockImplementation(async (sql: string) => ({ rows: sql.includes('count(*)') ? [{ active: 0, total: 0 }] : sql.startsWith('INSERT') ? [{ id: jobId, kind: 'dub-audio', status: 'queued' }] : [] }));
+		await createStudioJob('owner', id, { kind: 'dub-audio', dubbing: { url: 'https://youtu.be/abcdefghijk?t=5', offset: 2 } });
+		const insert = mocked.clientQuery.mock.calls.find(([sql]) => sql.startsWith('INSERT'))!;
+		expect(insert[1][3]).toBe('dub-audio');
+		expect(JSON.parse(insert[1][4])).toEqual({ project: { ...edit(), clips: [] }, dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: 0 } });
+	});
+	it('snapshots owned prepared audio so deleting it cannot break an already queued export', async () => {
+		const prepared = { ...completed, kind: 'dub-audio', dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: 0 } };
+		mocked.query.mockImplementation(async (sql: string) => sql.includes('FROM studio_projects') ? [{ id, edit: edit(), createdAt: new Date(), updatedAt: new Date() }] : [prepared]);
+		mocked.clientQuery.mockImplementation(async (sql: string) => ({ rows: sql.includes('count(*)') ? [{ active: 0, total: 0 }] : sql.startsWith('INSERT') ? [{ id: randomUUID(), kind: 'dub', status: 'queued' }] : [] }));
+		await writeFile(path.join(root, 'downloads', 'film.mp4'), 'movie');
+		await writeFile(await studioOutput(jobId, 'dub-audio'), 'prepared French audio');
+		await createStudioJob('owner', id, { kind: 'dub', source: clip, dubbing: { url: 'https://youtu.be/abcdefghijk', offset: -0.125, audioJobId: jobId } });
+		const insert = mocked.clientQuery.mock.calls.find(([sql]) => sql.startsWith('INSERT'))!;
+		expect(JSON.parse(insert[1][4]).dubbing).toEqual({ ...prepared.dubbing, offset: -0.125, audioJobId: jobId });
+		await deleteStudioJob('owner', id, jobId, true);
+		expect(await readFile(path.join(root, 'studio', insert[1][0], 'audio.m4a'), 'utf8')).toBe('prepared French audio');
+		expect(mocked.query.mock.calls.find(([sql]) => sql.includes('FROM studio_jobs'))?.[1]).toEqual([jobId, id, 'owner']);
+	});
+	it.each([
+		{ kind: 'export' }, { status: 'running' }, { dubbing: { url: 'https://www.youtube.com/watch?v=other_video' } }
+	])('rejects a cached soundtrack of the wrong kind, state or URL (%j)', async (changes) => {
+		mocked.query.mockImplementation(async (sql: string) => sql.includes('FROM studio_projects') ? [{ id, edit: edit(), createdAt: new Date(), updatedAt: new Date() }] : [{ ...completed, kind: 'dub-audio', dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: 0 }, ...changes }]);
+		await writeFile(path.join(root, 'downloads', 'film.mp4'), 'movie');
+		await expect(createStudioJob('owner', id, { kind: 'dub', source: clip, dubbing: { url: 'https://youtu.be/abcdefghijk', offset: 0, audioJobId: jobId } })).rejects.toMatchObject({ status: 400 });
+		expect(mocked.clientQuery).not.toHaveBeenCalled();
+	});
+	it('rejects unavailable and symlinked prepared audio without queueing an export', async () => {
+		const prepared = { ...completed, kind: 'dub-audio', dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: 0 } };
+		mocked.query.mockImplementation(async (sql: string) => sql.includes('FROM studio_projects') ? [{ id, edit: edit(), createdAt: new Date(), updatedAt: new Date() }] : [prepared]);
+		await writeFile(path.join(root, 'downloads', 'film.mp4'), 'movie');
+		const input = { kind: 'dub', source: clip, dubbing: { url: 'https://youtu.be/abcdefghijk', offset: 0, audioJobId: jobId } };
+		await expect(createStudioJob('owner', id, input)).rejects.toMatchObject({ status: 404 });
+		await symlink(path.join(root, 'downloads', 'film.mp4'), await studioOutput(jobId, 'dub-audio'));
+		await expect(createStudioJob('owner', id, input)).rejects.toMatchObject({ status: 403 });
+		mocked.query.mockImplementation(async (sql: string) => sql.includes('FROM studio_projects') ? [{ id, edit: edit(), createdAt: new Date(), updatedAt: new Date() }] : []);
+		await expect(createStudioJob('owner', id, input)).rejects.toMatchObject({ status: 404 });
+		expect(mocked.clientQuery).not.toHaveBeenCalled();
+		expect(await readdir(path.join(root, 'studio'))).toEqual([jobId]);
 	});
 });

@@ -15,7 +15,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const videos = /\.(mp4|m4v|webm|ogv|mkv|mov|avi|mpeg|mpg|wmv|flv|m2ts|mts|vob|3gp)$/i;
 type ProjectRow = { id: string; edit: StudioEdit; createdAt: Date; updatedAt: Date };
 const projectFields = 'id,edit,created_at AS "createdAt",updated_at AS "updatedAt"';
-const jobFields = 'id,project_id AS "projectId",kind,status,progress,error,result,created_at AS "createdAt",updated_at AS "updatedAt"';
+const jobFields = 'id,project_id AS "projectId",kind,status,progress,error,result,input->\'dubbing\' AS dubbing,created_at AS "createdAt",updated_at AS "updatedAt"';
 
 export function studioId(value: unknown): string {
 	if (typeof value !== 'string' || !uuid.test(value)) error(404, 'Projet ou tâche introuvable.');
@@ -42,7 +42,8 @@ export function validateStudioDubbing(value: unknown): StudioDubbing {
 		url.pathname === '/watch' ? url.searchParams.get('v') : /^\/(?:shorts|live|embed)\/([^/]+)$/.exec(url.pathname)?.[1];
 	if (!video || !/^[a-zA-Z0-9_-]{11}$/.test(video)) error(400, 'Lien vers une seule vidéo YouTube requis.');
 	if (typeof input.offset !== 'number' || !Number.isFinite(input.offset) || Math.abs(input.offset) > 600) error(400, 'Décalage audio requis entre −600 et 600 secondes.');
-	return { url: `https://www.youtube.com/watch?v=${video}`, offset: input.offset };
+	if (input.audioJobId !== undefined) studioId(input.audioJobId);
+	return { url: `https://www.youtube.com/watch?v=${video}`, offset: input.offset, ...(input.audioJobId !== undefined ? { audioJobId: input.audioJobId as string } : {}) };
 }
 
 export function validateStudioEdit(input: Record<string, unknown>): StudioEdit {
@@ -83,7 +84,7 @@ export async function studioJobDirectory(id: string) {
 
 export async function studioOutput(id: string, kind: StudioJobKind) {
 	if (kind === 'probe') error(400, 'Cette tâche ne produit pas de fichier.');
-	return path.join(await studioJobDirectory(id), kind === 'thumbnail' ? 'output.jpg' : kind === 'dub' ? 'output.mkv' : 'output.mp4');
+	return path.join(await studioJobDirectory(id), kind === 'thumbnail' ? 'output.jpg' : kind === 'dub-audio' ? 'output.m4a' : kind === 'dub' ? 'output.mkv' : 'output.mp4');
 }
 
 export const studioFingerprint = (stat: Pick<Stats, 'dev' | 'ino' | 'size' | 'mtimeMs' | 'ctimeMs'>) => createHash('sha256').update(`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`).digest('hex');
@@ -146,17 +147,18 @@ export async function ownedStudioJob(userId: string, projectId: string, id: stri
 export async function createStudioJob(userId: string, projectId: string, input: Record<string, unknown>) {
 	const edit = await ownedStudioProject(userId, projectId);
 	const kind = input.kind;
-	if (kind !== 'probe' && kind !== 'thumbnail' && kind !== 'preview' && kind !== 'export' && kind !== 'dub') error(400, 'Tâche invalide.');
+	if (kind !== 'probe' && kind !== 'thumbnail' && kind !== 'preview' && kind !== 'export' && kind !== 'dub-audio' && kind !== 'dub') error(400, 'Tâche invalide.');
 	const snapshot: StudioJobInput = { project: validateStudioEdit(edit) };
+	if (kind === 'dub' || kind === 'dub-audio') snapshot.dubbing = validateStudioDubbing(input.dubbing);
+	if (kind === 'dub-audio') snapshot.dubbing = { url: snapshot.dubbing!.url, offset: 0 };
 	if (kind === 'probe' || kind === 'thumbnail' || kind === 'dub') {
 		snapshot.source = sourceInput(input.source);
 		snapshot.fingerprint = (await sourceFingerprint(snapshot.source)).fingerprint;
-		if (kind === 'dub') snapshot.dubbing = validateStudioDubbing(input.dubbing);
 		if (kind === 'thumbnail') {
 			if (typeof input.time !== 'number' || !Number.isFinite(input.time) || input.time < 0 || input.time > 86400) error(400, 'Timecode invalide.');
 			snapshot.time = input.time;
 		}
-	} else {
+	} else if (kind !== 'dub-audio') {
 		if (!snapshot.project.clips.length) error(400, 'Ajouter au moins un extrait.');
 		for (const clip of snapshot.project.clips) {
 			if ((await sourceFingerprint(clip)).fingerprint !== clip.fingerprint) error(409, 'Une source a changé. Analyser à nouveau la vidéo.');
@@ -166,6 +168,19 @@ export async function createStudioJob(userId: string, projectId: string, input: 
 	await studioJobDirectory(id);
 	try {
 		await requireStudioStorage();
+		if (kind === 'dub' && snapshot.dubbing?.audioJobId) {
+			const prepared = await ownedStudioJob(userId, projectId, snapshot.dubbing.audioJobId);
+			if (prepared.kind !== 'dub-audio' || prepared.status !== 'completed' || prepared.dubbing?.url !== snapshot.dubbing.url) error(400, 'Bande son YouTube préparée requise pour ce lien.');
+			const audio = await studioOutput(prepared.id, 'dub-audio');
+			try {
+				const original = await lstat(audio);
+				if (!original.isFile() || original.isSymbolicLink()) error(403, 'Bande son invalide.');
+				// A private hard link keeps queued exports valid if the preparation is later deleted.
+				await link(audio, path.join(studioRoot(), id, 'audio.m4a'));
+				const stat = await lstat(path.join(studioRoot(), id, 'audio.m4a'));
+				if (!stat.isFile() || stat.isSymbolicLink() || stat.dev !== original.dev || stat.ino !== original.ino) error(403, 'Bande son invalide.');
+			} catch (cause) { if ((cause as NodeJS.ErrnoException).code === 'ENOENT') error(404, 'Bande son introuvable. Téléchargez-la à nouveau.'); throw cause; }
+		}
 		return await transaction(async (client) => {
 			await client.query('SELECT pg_advisory_xact_lock(782414,hashtext($1))', [userId]);
 			const { rows: [counts] } = await client.query(`SELECT count(*) FILTER (WHERE status IN ('queued','running'))::int AS active,count(*) FILTER (WHERE project_id=$2)::int AS total FROM studio_jobs WHERE user_id=$1`, [userId, projectId]);

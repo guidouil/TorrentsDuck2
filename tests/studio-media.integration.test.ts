@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFile, spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { sourceFingerprint, studioOutput } from '../src/lib/server/studio';
+import { sourceFingerprint, studioJobDirectory, studioOutput } from '../src/lib/server/studio';
 import { runStudioJob, type WorkerJob } from '../src/lib/server/studio-worker';
 import type { StudioClip, StudioEdit, StudioJobKind, StudioSource } from '../src/lib/studio';
 
@@ -82,7 +82,7 @@ describe.skipIf(!available)('Studio with native FFmpeg and synthetic media', () 
 		expect(await audio('1.4')).toBeLessThan(50);
 	}, 60_000);
 
-	it('adds synchronized French audio without changing source video/audio packets or cutting the film', async () => {
+	it('prepares audio once and exports both offsets without downloading again or changing source packets', async () => {
 		const bin = path.join(root, 'bin');
 		await mkdir(bin);
 		const french = path.join(root, 'french.m4a');
@@ -91,6 +91,14 @@ describe.skipIf(!available)('Studio with native FFmpeg and synthetic media', () 
 		await writeFile(downloader, `#!${process.execPath}\nconst fs = require('node:fs'); const args=process.argv.slice(2); if(!args.includes('--proxy') || !args.includes('--no-remote-components') || !args.includes('--no-plugin-dirs')) process.exit(1); fs.copyFileSync(${JSON.stringify(french)}, args[args.indexOf('--output')+1]);\n`);
 		await chmod(downloader, 0o755);
 		vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
+		const prepared = job('dub-audio');
+		prepared.input.dubbing = { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: 0 };
+		await runStudioJob(prepared, { signal: signal() });
+		const audioFile = await studioOutput(prepared.id, 'dub-audio');
+		const audioMetadata = JSON.parse((await exec('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,sample_rate,channels', '-of', 'json', audioFile])).stdout);
+		expect(audioMetadata.streams).toEqual([{ codec_name: 'aac', codec_type: 'audio', sample_rate: '48000', channels: 2 }]);
+		expect(await readdir(path.dirname(audioFile))).toEqual(['output.m4a']);
+		await rm(downloader);
 		const captions = path.join(root, 'captions.srt');
 		await writeFile(captions, '1\n00:00:00,100 --> 00:00:02,000\nOriginal caption\n');
 		const original = path.join(root, 'share/dub-source.mp4');
@@ -106,7 +114,8 @@ describe.skipIf(!available)('Studio with native FFmpeg and synthetic media', () 
 		const before = await readFile(original);
 		for (const offset of [0.5, -0.5]) {
 			const dubbed = job('dub');
-			dubbed.input = { project: empty, source: dubSource, fingerprint: (await sourceFingerprint(dubSource)).fingerprint, dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset } };
+			dubbed.input = { project: empty, source: dubSource, fingerprint: (await sourceFingerprint(dubSource)).fingerprint, dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset, audioJobId: prepared.id } };
+			await link(audioFile, path.join(await studioJobDirectory(dubbed.id), 'audio.m4a'));
 			await runStudioJob(dubbed, { signal: signal() });
 			const output = await studioOutput(dubbed.id, 'dub');
 			const { stdout } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height:stream_tags=language:stream_disposition=default', '-of', 'json', output]);

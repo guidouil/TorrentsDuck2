@@ -24,14 +24,16 @@ function editor(api = vi.fn()) {
   };
   const script = source.split('<script lang="ts">')[1].split('</script>')[0].replace(/^\s*import .+;\s*$/gm, '')
     .replace('const selected = $derived(project?.clips[selectedIndex]);', "Object.defineProperty(globalThis, 'selected', { get: () => project?.clips[selectedIndex] });")
-    .replace('const total = $derived(project ? studioDuration(project.clips) : 0);', "Object.defineProperty(globalThis, 'total', { get: () => project ? studioDuration(project.clips) : 0 });");
+    .replace('const total = $derived(project ? studioDuration(project.clips) : 0);', "Object.defineProperty(globalThis, 'total', { get: () => project ? studioDuration(project.clips) : 0 });")
+    .replace("const dubbingAudio = $derived(jobs.find((job) => job.id === dubbingAudioId && job.kind === 'dub-audio' && job.dubbing?.url === dubbingUrl.trim()));", "Object.defineProperty(globalThis, 'dubbingAudio', { get: () => jobs.find((job) => job.id === dubbingAudioId && job.kind === 'dub-audio' && job.dubbing?.url === dubbingUrl.trim()) });")
+    .replace("const preparedAudio = $derived(dubbingAudio?.status === 'completed' ? dubbingAudio : undefined);", "Object.defineProperty(globalThis, 'preparedAudio', { get: () => dubbingAudio?.status === 'completed' ? dubbingAudio : undefined });");
   runInNewContext(transpile(`${script}\nglobalThis.editor = {
     refresh, addMedia, moveClip, removeClip, createJob, importSrt, cancelJob, isVideo, ask, confirm,
-    fileUrl, timecode, seek, playClip, updatePlayback, finishSeeking, selectClip, setBoundary,
+    fileUrl, timecode, seek, playClip, updatePlayback, finishSeeking, selectClip, setBoundary, useDubbingAudio,
     setup: (value, tasks = []) => { project = value; jobs = tasks; baseline = JSON.stringify(edit(value)); },
     playback: (element, length = 600) => { video = element; sourceDuration = length; playhead = element.currentTime; },
     dubbing: (url, offset) => { dubbingUrl = url; dubbingOffset = offset; },
-    state: () => ({ project, jobs, selectedIndex, error, busy, previewingClip, selectedJob, confirmation, sharedName })
+    state: () => ({ project, jobs, selectedIndex, error, busy, previewingClip, selectedJob, confirmation, sharedName, dubbingUrl, dubbingAudioId, dubbingOffset, preparedAudio })
   };`), context);
   context.editor.setup(structuredClone(project));
   return { api, ...context.editor };
@@ -119,18 +121,55 @@ describe('studio editing', () => {
 });
 
 describe('studio French soundtrack', () => {
-  it('queues the whole source and an offset without saving montage edits or applying clip bounds', async () => {
+  const url = 'https://www.youtube.com/watch?v=abcdefghijk';
+  const audio = { id: 'prepared', kind: 'dub-audio', status: 'completed', dubbing: { url, offset: 0 } };
+
+  it('downloads audio first without saving or requiring montage excerpts', async () => {
+    const job = { ...audio, status: 'queued' };
+    const ui = editor(vi.fn().mockResolvedValue({ job }));
+    ui.setup({ ...structuredClone(project), clips: [] });
+    ui.dubbing(' https://youtu.be/abcdefghijk ', 2);
+    await ui.createJob('dub-audio');
+    expect(ui.api).toHaveBeenCalledExactlyOnceWith('/api/studio/project/jobs', {
+      method: 'POST', body: JSON.stringify({ kind: 'dub-audio', dubbing: { url: 'https://youtu.be/abcdefghijk', offset: 0 } })
+    });
+    expect(ui.state()).toMatchObject({ dubbingUrl: url, dubbingAudioId: 'prepared', dubbingOffset: 0 });
+    expect(ui.state().preparedAudio).toBeUndefined();
+  });
+
+  it('queues the whole source with the prepared audio and fine offset without saving montage edits or applying clip bounds', async () => {
     const job = { id: 'dub', kind: 'dub', status: 'queued' };
     const ui = editor(vi.fn().mockResolvedValue({ job }));
-    ui.setup({ ...structuredClone(project), clips: [{ ...clip, start: 150, end: 550 }] });
-    ui.dubbing(' https://youtu.be/abcdefghijk ', -2.25);
+    ui.setup({ ...structuredClone(project), clips: [{ ...clip, start: 150, end: 550 }] }, [audio]);
+    ui.useDubbingAudio(audio);
+    ui.dubbing(url, -2.257);
     await ui.createJob('dub', { space: clip.space, path: clip.path });
     expect(ui.api).toHaveBeenCalledExactlyOnceWith('/api/studio/project/jobs', {
-      method: 'POST', body: JSON.stringify({ kind: 'dub', source: { space: clip.space, path: clip.path }, dubbing: { url: 'https://youtu.be/abcdefghijk', offset: -2.25 } })
+      method: 'POST', body: JSON.stringify({ kind: 'dub', source: { space: clip.space, path: clip.path }, dubbing: { url, offset: -2.257, audioJobId: 'prepared' } })
     });
-    expect(ui.state().jobs).toEqual([job]);
+    expect(ui.state().jobs).toEqual([job, audio]);
     expect(ui.state().selectedJob).toBe('');
     expect(ui.state().project.clips[0]).toMatchObject({ start: 150, end: 550 });
+  });
+
+  it.each(['queued', 'failed', 'cancelled', 'deleted', 'changed-url'])('requires a matching completed preparation before exporting (%s)', async (state) => {
+    const task = { ...audio, status: state === 'changed-url' ? 'completed' : state };
+    const ui = editor();
+    ui.setup(structuredClone(project), state === 'deleted' ? [] : [task]);
+    ui.useDubbingAudio(task);
+    if (state === 'changed-url') ui.dubbing('https://youtu.be/lmnopqrstuv', 0);
+    await ui.createJob('dub', { space: clip.space, path: clip.path });
+    expect(ui.api).not.toHaveBeenCalled();
+    expect(ui.state().error).toBe(get(t).studio.dubInvalid);
+  });
+
+  it('restores the most recent preparation after opening the project', async () => {
+    const ui = editor(vi.fn().mockResolvedValue({ project, jobs: [audio] }));
+    await ui.refresh(true);
+    expect(ui.state()).toMatchObject({ dubbingUrl: url, dubbingAudioId: 'prepared', preparedAudio: audio });
+    ui.dubbing(url, 0.123);
+    await ui.refresh();
+    expect(ui.state().dubbingOffset).toBe(0.123);
   });
 
   it.each([NaN, 601, -601])('refuses invalid offsets before requesting work (%s)', async (offset) => {
