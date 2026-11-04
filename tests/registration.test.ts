@@ -38,6 +38,17 @@ describe('public registration administrator configuration', () => {
   });
   afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
+  it.each([8, 128])('accepts a password of %i characters without composition requirements', async (length) => {
+    const response = await POST(event({ ...body, password: 'a'.repeat(length) }));
+    expect(response.status).toBe(201);
+    expect(insertedUser()).toBeDefined();
+  });
+
+  it.each([7, 129])('rejects a password of %i characters before creating an account', async (length) => {
+    await expect(POST(event({ ...body, password: 'a'.repeat(length) }))).rejects.toMatchObject({ status: 400 });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it('reserves the configured administrator role but requires email verification before approval', async () => {
     vi.stubEnv('ADMIN_EMAIL', '  ADMIN@EXAMPLE.COM  ');
     const response = await POST(event({ ...body, email: 'ADMIN@example.com' }));

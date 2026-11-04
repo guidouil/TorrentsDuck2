@@ -54,6 +54,7 @@ services:
       QBT_URL: http://qbittorrent:8080
       QBT_USERNAME: ${QBT_USERNAME:?Set QBT_USERNAME}
       QBT_PASSWORD: ${QBT_PASSWORD:?Set QBT_PASSWORD}
+      TMDB_READ_ACCESS_TOKEN: ${TMDB_READ_ACCESS_TOKEN:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
       MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-}
@@ -83,6 +84,7 @@ services:
       - ${DATA_ROOT:-/srv/torrentduck}/downloads:/data/downloads
       - ${DATA_ROOT:-/srv/torrentduck}/share:/data/share
       - ${DATA_ROOT:-/srv/torrentduck}/studio:/data/studio
+      - ${DATA_ROOT:-/srv/torrentduck}/cache:/data/cache
       - /sys/fs/cgroup:/host-cgroup:ro
     networks: [edge, database, rpc, auth]
     depends_on:

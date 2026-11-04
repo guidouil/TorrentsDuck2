@@ -12,21 +12,25 @@ function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedVa
   const goto = vi.fn();
   const script = readFileSync(new URL('../src/routes/(app)/files/+page.svelte', import.meta.url), 'utf8')
     .split('<script lang="ts">')[1].split('</script>')[0].replace(/^\s*import .+;\s*$/gm, '');
+  const assign = vi.fn();
+  const anchor = { href: '', download: '', click: vi.fn() };
+  const createObjectURL = vi.fn(() => 'blob:preview');
+  const PreviewURL = class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); };
   const context: Record<string, any> = {
-    URL, URLSearchParams, api, goto, navigator: device, $t: { audioResumeHelp: 'Resume playback', browserUnsupported: 'Unsupported media' },
+    URL: PreviewURL, URLSearchParams, Blob, api, goto, navigator: device, window: { location: { assign, origin: new URL(url).origin } }, document: { createElement: vi.fn(() => anchor) }, $t: { audioResumeHelp: 'Resume playback', browserUnsupported: 'Unsupported media' },
     page: { url: new URL(url), shallow: shallowUrl ? { url: new URL(shallowUrl) } : null },
     $props: () => ({ data: { user: { role } } }),
     $state: (value: unknown) => value, $derived: (value: unknown) => value, $effect: () => {}
   };
-  runInNewContext(transpile(`${script}\nglobalThis.explorer = { browse, enter, switchSpace, loadFiles, fileIcon, mobileVlcUrl, makeLink, ask, mutate, openVideo, changeAudioTrack, loadedVideo, canPlayAudio, setPlayer: (element) => { player = element; }, videoSource: () => video ? fileUrl(video, true, selectedAudio) : '', state: () => ({ space, path, query, sort, offset, entries, loading, busy, error, link, linkOpen, vlcLink, canDelete, dialogOpen, selected, video, videoOpen, audioTracks, selectedAudio, audioLoading, audioError, mobilePlayback }) };`), context);
-  return { api, goto, ...context.explorer as {
+  runInNewContext(transpile(`${script}\nglobalThis.explorer = { browse, enter, switchSpace, loadFiles, fileIcon, mobileVlcUrl, makeLink, ask, mutate, openVideo, changeAudioTrack, loadedVideo, canPlayAudio, setPlayer: (element) => { player = element; }, videoSource: () => video ? fileUrl(video, true, selectedAudio) : '', state: () => ({ space, path, query, sort, streaming, entries, loading, busy, error, link, linkOpen, vlcLink, canDelete, dialogOpen, selected, video, videoOpen, audioTracks, selectedAudio, audioLoading, audioError, mobilePlayback }) };`), context);
+  return { api, goto, assign, anchor, createObjectURL, ...context.explorer as {
     browse: (values: Record<string, string>, replace?: boolean) => void;
     enter: (path: string) => void;
     switchSpace: (space: string) => void;
     loadFiles: () => Promise<void>;
     fileIcon: (name: string) => string;
     mobileVlcUrl: (url: string, name: string) => string;
-    makeLink: (entry: { name: string; path: string }) => Promise<void>;
+    makeLink: (entry: { name: string; path: string }, launch?: boolean) => Promise<void>;
     ask: (action: string, entry: { name: string; path: string }) => void;
     mutate: (event: { preventDefault: () => void }) => Promise<void>;
     openVideo: (entry: { name: string; path: string }) => Promise<void>;
@@ -35,7 +39,7 @@ function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedVa
     canPlayAudio: (codec: string) => boolean;
     setPlayer: (element: Player) => void;
     videoSource: () => string;
-    state: () => { space: string; path: string; query: string; sort: string; offset: number; entries: unknown[]; loading: boolean; busy: boolean; error: string; link: unknown; linkOpen: boolean; vlcLink: string; canDelete: boolean; dialogOpen: boolean; selected: unknown; video: unknown; videoOpen: boolean; audioTracks: unknown[]; selectedAudio: string; audioLoading: boolean; audioError: string; mobilePlayback: boolean };
+    state: () => { space: string; path: string; query: string; sort: string; streaming: boolean; entries: unknown[]; loading: boolean; busy: boolean; error: string; link: unknown; linkOpen: boolean; vlcLink: string; canDelete: boolean; dialogOpen: boolean; selected: unknown; video: unknown; videoOpen: boolean; audioTracks: unknown[]; selectedAudio: string; audioLoading: boolean; audioError: string; mobilePlayback: boolean };
   } };
 }
 
@@ -250,26 +254,26 @@ describe('file explorer URL navigation', () => {
 
   it.each([undefined, shared])('loads a bookmarked or shallow URL with all its explorer state (%s)', async (shallowUrl) => {
     const files = explorer(shallowUrl ? origin : shared, shallowUrl);
-    expect(files.state()).toMatchObject({ space: 'share', path: 'Films/Été 2026', query: 'version longue', sort: 'size', offset: 50 });
+    expect(files.state()).toMatchObject({ space: 'share', path: 'Films/Été 2026', query: 'version longue', sort: 'size', streaming: false });
     await files.loadFiles();
     const request = new URL(files.api.mock.calls[0][0], origin);
-    expect(Object.fromEntries(request.searchParams)).toEqual({ space: 'share', path: 'Films/Été 2026', search: 'version longue', sort: 'size', offset: '50', limit: '50' });
+    expect(Object.fromEntries(request.searchParams)).toEqual({ space: 'share', path: 'Films/Été 2026', search: 'version longue', sort: 'size', all: '1' });
   });
 
   it.each([
     ['Films/Été 2026/A & B #1', 'name'],
     ['Films', 'name'],
     ['', 'modifiedAt']
-  ])('resets sort, search and pagination when entering %s and restores them on back', (path, sort) => {
+  ])('resets sort and search and removes legacy pagination when entering %s and restores them on back', (path, sort) => {
     const files = explorer(shared);
     files.enter(path);
     const [target, options] = files.goto.mock.calls[0];
     expect(target.pathname).toBe('/files');
     expect(Object.fromEntries(target.searchParams)).toEqual({ space: 'share', ...(path ? { path } : {}) });
     expect(options).toEqual({ shallow: true, replace: false, reset: false });
-    expect(explorer(origin, target.href).state()).toMatchObject({ path, sort, query: '', offset: 0 });
-    expect(explorer(origin, shared).state()).toMatchObject({ path: 'Films/Été 2026', sort: 'size', query: 'version longue', offset: 50 });
-    expect(explorer(target.href).state()).toMatchObject({ path, sort, query: '', offset: 0 });
+    expect(explorer(origin, target.href).state()).toMatchObject({ path, sort, query: '', streaming: false });
+    expect(explorer(origin, shared).state()).toMatchObject({ path: 'Films/Été 2026', sort: 'size', query: 'version longue', streaming: false });
+    expect(explorer(target.href).state()).toMatchObject({ path, sort, query: '', streaming: false });
   });
 
   it('switches spaces at the root and preserves the chosen sort', () => {
@@ -280,16 +284,20 @@ describe('file explorer URL navigation', () => {
 
   it('updates search without losing the folder or sort and replaces subsequent typing in history', () => {
     const files = explorer(shared);
-    files.browse({ search: 'A&B + été', offset: '' }, true);
+    files.browse({ search: 'A&B + été' }, true);
     const [target, options] = files.goto.mock.calls[0];
     expect(Object.fromEntries(target.searchParams)).toEqual({ space: 'share', path: 'Films/Été 2026', search: 'A&B + été', sort: 'size' });
     expect(options).toMatchObject({ replace: true });
-    files.browse({ search: 'version longue', offset: '50' });
-    expect(files.goto).toHaveBeenCalledTimes(1);
+    files.browse({ search: 'version longue' });
+    expect(files.goto).toHaveBeenCalledTimes(2);
   });
 
-  it.each(['-50', 'Infinity', 'NaN', '1.5', '9007199254740992'])('ignores invalid pagination offset %s', (offset) => {
-    expect(explorer(`${origin}?offset=${offset}`).state().offset).toBe(0);
+  it.each(['50', '-50', 'Infinity', 'NaN', '1.5', '9007199254740992'])('ignores legacy pagination offset %s and requests the whole folder', async (offset) => {
+    const files = explorer(`${origin}?offset=${offset}`);
+    await files.loadFiles();
+    const request = new URL(files.api.mock.calls[0][0], origin);
+    expect(request.searchParams.get('all')).toBe('1');
+    expect(request.searchParams.has('offset')).toBe(false);
   });
 
   it('keeps the latest listing when an older request finishes later', async () => {
@@ -303,4 +311,43 @@ describe('file explorer URL navigation', () => {
     await first;
     expect(files.state()).toMatchObject({ entries: [{ name: 'new file' }], loading: false, error: '' });
   });
+});
+
+
+describe('streaming view', () => {
+  it('loads all videos recursively with newest additions sorted by the server', async () => {
+    const files = explorer(`${shared}&view=streaming`);
+    expect(files.state().streaming).toBe(true);
+    await files.loadFiles();
+    const request = new URL(files.api.mock.calls[0][0], origin);
+    expect(request.pathname).toBe('/api/files/streaming');
+    expect(Object.fromEntries(request.searchParams)).toEqual({ space: 'share', search: 'version longue' });
+  });
+
+  it('preserves the explorer location when switching views', () => {
+    const files = explorer(shared);
+    files.browse({ view: 'streaming' });
+    const target = files.goto.mock.calls[0][0];
+    expect(Object.fromEntries(target.searchParams)).toEqual({ space: 'share', path: 'Films/Été 2026', search: 'version longue', sort: 'size', view: 'streaming' });
+  });
+
+  it('attempts VLC directly on poster click and retains the link dialog for browsers requiring a second tap', async () => {
+    const link = { id: 'link-id', url: 'https://duck.example.com/api/files/play/token', expiresAt: '2026-11-04T20:00:00.000Z' };
+    const files = explorer(`${origin}?view=streaming`, undefined, vi.fn().mockResolvedValue(link), { userAgent: 'Android', maxTouchPoints: 5 });
+    await files.makeLink({ name: 'film.mkv', path: 'Films/film.mkv' }, true);
+    expect(files.assign).toHaveBeenCalledWith(files.mobileVlcUrl(link.url, 'film.mkv'));
+    expect(files.state()).toMatchObject({ linkOpen: true, busy: false, error: '' });
+  });
+});
+
+
+it('downloads a VLC playlist immediately on desktop poster click', async () => {
+  const link = { id: 'link-id', url: 'https://duck.example.com/api/files/play/token', expiresAt: '2026-11-04T20:00:00.000Z' };
+  const files = explorer(`${origin}?view=streaming`, undefined, vi.fn().mockResolvedValue(link));
+  await files.makeLink({ name: 'film.mkv', path: 'Films/film.mkv' }, true);
+  expect(files.assign).not.toHaveBeenCalled();
+  expect(files.anchor).toMatchObject({ href: 'blob:preview', download: 'torrents-duck.m3u' });
+  expect(files.anchor.click).toHaveBeenCalledOnce();
+  expect(await (files.createObjectURL.mock.calls[0] as unknown as [Blob])[0].text()).toBe(`#EXTM3U\n${link.url}\n`);
+  expect(files.state()).toMatchObject({ linkOpen: true, busy: false, error: '' });
 });

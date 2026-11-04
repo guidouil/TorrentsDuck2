@@ -66,6 +66,14 @@ L’inscription est libre ; chaque nouveau compte reste sur une page d’attente
 
 Pour connecter une télé sans y saisir son mot de passe, choisir « Se connecter avec mon téléphone » sur la page de connexion. Scanner le QR code, se connecter sur le téléphone si nécessaire, comparer le code affiché sur les deux écrans puis autoriser la connexion. Le QR code expire après cinq minutes et ne peut servir qu’une fois. N’autoriser que les demandes lancées sur son propre appareil. Une déconnexion sur un appareil ferme toutes les sessions web du compte, y compris sur la télé, et annule ses QR codes déjà autorisés mais pas encore utilisés. Les écrans ouverts détectent la déconnexion en quelques secondes lorsque leur connexion réseau est disponible. Les deux appareils doivent pouvoir accéder à la même adresse du site (HTTPS en production).
 
+### Mode streaming
+
+Dans **Fichiers → Streaming**, les vidéos de l’espace sélectionné (`downloads` ou `share`), sous-dossiers compris, s’affichent par ajout récent. Le tri utilise la date de création fournie par le système de fichiers, ou la date de changement des métadonnées si elle manque ; une copie ou une restauration peut donc modifier cet ordre. Cliquer sur une affiche prépare le lien révocable et tente l’ouverture dans VLC sur mobile ; sur ordinateur, une playlist est téléchargée et son ouverture dépend de l’association des fichiers `.m3u` à VLC. Le navigateur peut demander une autorisation ou bloquer l’ouverture ; le dialogue conserve le lien et les actions VLC.
+
+Les affiches proviennent de TMDB si `TMDB_READ_ACCESS_TOKEN` est configuré côté serveur. Obtenir un **API Read Access Token** dans les [paramètres API du compte TMDB](https://www.themoviedb.org/settings/api), puis redémarrer le service web. Les noms de fichiers servent à rechercher les films : une correspondance peut manquer ou être erronée. Sans jeton, sans correspondance ou en cas d’erreur, une affiche générique est utilisée. Les images et les recherches sans résultat sont mises en cache dans `DATA_ROOT/cache/covers`, hors des espaces partagés ; le navigateur ne contacte pas TMDB. En Docker local, le cache est dans le volume nommé `cache` ; fournir le jeton dans l’environnement avant `npm run local:up` pour activer les affiches.
+
+L’explorateur affiche tout le dossier sans pagination. Les tris par date et par nom mélangent dossiers et fichiers selon la valeur choisie.
+
 ### Lecture dans VLC
 
 Dans l’explorateur, l’action « Ouvrir dans VLC » prépare un lien de lecture valable six heures et révocable. Sur Android, iPhone et iPad, toucher ensuite le bouton « Ouvrir dans VLC » de la fenêtre pour transmettre le média à l’application installée ; le navigateur peut demander confirmation. Le site ne peut pas vérifier si VLC est installé. La copie du lien et la playlist restent disponibles, notamment sur ordinateur ou si le navigateur bloque l’ouverture de l’application.

@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { vi } from 'vitest';
 import type { PoolClient } from 'pg';
-const mocked = vi.hoisted(() => ({ connect: vi.fn() }));
+const mocked = vi.hoisted(() => ({ connect: vi.fn(), statfs: vi.fn() }));
+vi.mock('node:fs/promises', async (original) => {
+	const fs = await original<typeof import('node:fs/promises')>();
+	return { ...fs, statfs: mocked.statfs.mockImplementation(fs.statfs) };
+});
 vi.mock('../src/lib/server/db', () => ({ db: { connect: mocked.connect }, query: vi.fn(), transaction: vi.fn() }));
 import { runStudioProcess, runStudioWorker, studioAss, studioDimensions, studioJobAllowed, studioMetadata, studioVideoFilter, validateStudioOutput } from '../src/lib/server/studio-worker';
 import type { StudioClip } from '../src/lib/studio';
@@ -123,9 +127,11 @@ describe('Studio durable worker lifecycle', () => {
 		});
 		mocked.connect.mockResolvedValue(Object.assign(new EventEmitter(), { query, release: vi.fn() }));
 		try {
-			await runStudioWorker(controller.signal);
-			expect(query.mock.calls.find(([sql]) => sql.includes('status=$2,error=$3'))?.[1]).toEqual([id, 'failed', 'Fichier introuvable.']);
-			await expect(readFile(path.join(root, 'studio', id, 'output.mp4'))).rejects.toMatchObject({ code: 'ENOENT' });
+			await mocked.statfs.withImplementation(async () => ({ blocks: 1000, bsize: 1024, bfree: 800, bavail: 800 }), async () => {
+				await runStudioWorker(controller.signal);
+				expect(query.mock.calls.find(([sql]) => sql.includes('status=$2,error=$3'))?.[1]).toEqual([id, 'failed', 'Fichier introuvable.']);
+				await expect(readFile(path.join(root, 'studio', id, 'output.mp4'))).rejects.toMatchObject({ code: 'ENOENT' });
+			});
 		} finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
 	});
 	it('stops and destroys its dedicated lock connection on PostgreSQL disconnect', async () => {

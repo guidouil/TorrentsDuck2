@@ -140,8 +140,9 @@ esac
             downloads = next(mount for mount in services[service]["volumes"] if mount["target"] == "/data/downloads")
             self.assertEqual(downloads["source"], "downloads")
             self.assertFalse(downloads.get("read_only", False))
-        self.assertEqual(set(configuration["volumes"]), {"postgres", "downloads", "share", "qbittorrent", "studio"})
+        self.assertEqual(set(configuration["volumes"]), {"postgres", "downloads", "share", "qbittorrent", "studio", "cache"})
         self.assertIn("/data/studio", services["volumes"]["entrypoint"][-1])
+        self.assertIn("/data/cache", services["volumes"]["entrypoint"][-1])
         self.assertEqual(services["studio"]["depends_on"]["web"]["condition"], "service_healthy")
 
     @unittest.skipUnless(shutil.which("docker"), "Docker CLI unavailable")
@@ -155,6 +156,13 @@ esac
                 )
                 configuration = json.loads(result.stdout)
                 services = configuration["services"]
+                cache = next(mount for mount in services["web"]["volumes"] if mount["target"] == "/data/cache")
+                self.assertFalse(cache.get("read_only", False))
+                self.assertIn("TMDB_READ_ACCESS_TOKEN", services["web"]["environment"])
+                for name, service in services.items():
+                    if name not in ["web", "volumes"]:
+                        self.assertFalse(any(mount["target"] == "/data/cache" for mount in service.get("volumes", [])))
+                        self.assertNotIn("TMDB_READ_ACCESS_TOKEN", service.get("environment", {}))
                 worker = services["studio"]
                 self.assertEqual(worker["build"]["target"], "studio")
                 self.assertEqual(worker["cpus"], 1)

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
-import { error } from '@sveltejs/kit';
+import { error, isHttpError } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import busboy from 'busboy';
 import { requireStorage } from './storage';
@@ -74,10 +74,44 @@ export async function listFiles(space: Space, requested: string, options: URLSea
 	}
 	const sort = options.get('sort') ?? 'modifiedAt';
 	const direction = (options.get('order') ?? (sort === 'modifiedAt' ? 'desc' : 'asc')) === 'desc' ? -1 : 1;
-	entries.sort((a, b) => Number(b.directory) - Number(a.directory) || direction * (sort === 'size' ? a.size - b.size : sort === 'modifiedAt' ? a.modifiedAt.localeCompare(b.modifiedAt) : a.name.localeCompare(b.name)));
+	entries.sort((a, b) => direction * (sort === 'size' ? a.size - b.size : sort === 'modifiedAt' ? a.modifiedAt.localeCompare(b.modifiedAt) : a.name.localeCompare(b.name)) || a.name.localeCompare(b.name));
+	if (options.get('all') === '1') return { space, path: directory.relative, entries, total: entries.length, offset: 0, limit: entries.length };
 	const offset = Math.max(0, Math.min(Number(options.get('offset')) || 0, entries.length));
 	const limit = Math.max(1, Math.min(Number(options.get('limit')) || 100, 500));
 	return { space, path: directory.relative, entries: entries.slice(offset, offset + limit), total: entries.length, offset, limit };
+}
+
+export async function listStreamingFiles(space: Space, search = '') {
+	const entries: { name: string; path: string; directory: false; size: number; modifiedAt: string; addedAt: string }[] = [];
+	const directories = [''];
+	const query = search.toLocaleLowerCase();
+	const deadline = Date.now() + 30_000;
+	let visited = 0;
+	while (directories.length) {
+		const requested = directories.pop()!;
+		try {
+			const directory = await resolveFile(space, requested);
+			for (const dirent of await readdir(directory.absolute, { withFileTypes: true })) {
+				if (++visited > 100_000 || Date.now() > deadline) error(413, 'Bibliothèque trop volumineuse pour être parcourue en une fois.');
+				if (dirent.isSymbolicLink() || dirent.name.startsWith('.duck-upload-')) continue;
+				const relative = path.posix.join(directory.relative, dirent.name);
+				try {
+					const stat = await lstat(path.join(directory.absolute, dirent.name));
+					if (stat.isSymbolicLink()) continue;
+					if (stat.isDirectory()) directories.push(relative);
+					else if (stat.isFile() && stat.size > 0 && /\.(mp4|m4v|webm|ogv|mkv|mov|avi|mpeg|mpg|wmv|flv|m2ts|mts|vob|3gp)$/i.test(dirent.name) && relative.toLocaleLowerCase().includes(query)) {
+						// shortcut: restores reset birthtime; without it, metadata changes affect ctime. Exact import dates need an ingestion index.
+						const addedAt = (stat.birthtimeMs > 0 ? stat.birthtime : stat.ctime).toISOString();
+						entries.push({ name: dirent.name, path: relative, directory: false, size: stat.size, modifiedAt: stat.mtime.toISOString(), addedAt });
+					}
+				} catch (cause) { if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause; }
+			}
+		} catch (cause) {
+			if ((cause as NodeJS.ErrnoException).code !== 'ENOENT' && !(isHttpError(cause, 404) && requested)) throw cause;
+		}
+	}
+	entries.sort((a, b) => b.addedAt.localeCompare(a.addedAt) || a.path.localeCompare(b.path));
+	return { entries, total: entries.length };
 }
 
 export async function changeFiles(input: Record<string, unknown>, role: Member['role'] = 'member') {

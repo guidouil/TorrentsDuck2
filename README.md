@@ -68,6 +68,14 @@ Under **My account → Appearance**, choose Original Duck, ASCII, 8-bit or Corpo
 
 To connect a TV without entering a password on it, choose “Sign in with my phone” on the sign-in page. Scan the QR code, sign in on the phone if needed, compare the code on both screens, then approve the connection. The QR code expires after five minutes and can only be used once. Only approve requests started on your own device. Signing out on one device closes all web sessions for the account, including the TV, and cancels approved QR codes that have not yet been used. Open screens detect the sign-out within a few seconds when their network connection is available. Both devices must be able to reach the same site address, using HTTPS in production.
 
+### Streaming view
+
+In **Files → Streaming**, videos from the selected space (`downloads` or `share`), including subfolders, appear newest first. Sorting uses the creation date reported by the filesystem, or its metadata-change date when unavailable; copying or restoring files may therefore change the order. Clicking a poster creates a revocable link and attempts to open VLC on mobile; desktop browsers download a playlist whose opening depends on `.m3u` files being associated with VLC. Browsers may ask for permission or block opening the app; the dialog keeps the playback link and VLC actions available.
+
+Posters come from TMDB when `TMDB_READ_ACCESS_TOKEN` is configured on the server. Obtain an **API Read Access Token** from your [TMDB account API settings](https://www.themoviedb.org/settings/api), then restart the web service. Movie searches use filenames, so matches can be missing or incorrect. Without a token, a match or a working provider, a generic poster is used. Images and unsuccessful searches are cached in `DATA_ROOT/cache/covers`, outside the shared spaces; browsers do not contact TMDB. Local Docker stores this cache in its named `cache` volume; supply the token through the environment before `npm run local:up` to enable posters.
+
+The explorer displays the whole folder without pagination. Date and name sorting interleave folders and files according to the selected value.
+
 ### VLC playback
 
 In the file browser, “Open in VLC” prepares a revocable playback link valid for six hours. On Android, iPhone and iPad, then tap the dialog's “Open in VLC” button to pass the media to the installed app; the browser may ask for confirmation. The website cannot check whether VLC is installed. Copying the link and downloading the playlist remain available, including on desktop or when the browser blocks opening the app.

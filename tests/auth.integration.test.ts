@@ -453,7 +453,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
     expect(mail.reset).toHaveBeenCalled();
     const resetUrl = new URL(mail.reset.mock.calls.at(-1)![1]);
     const token = resetUrl.pathname.split('/').at(-1)!;
-    const newPassword = 'Un autre mot de passe 🦆 2026';
+    const newPassword = 'abcdefgh';
+    await expect(authModule.auth.api.resetPassword({ body: { token, newPassword: 'abcdefg' } })).rejects.toMatchObject({ body: { code: 'PASSWORD_TOO_SHORT' } });
+    await expect(authModule.auth.api.resetPassword({ body: { token, newPassword: 'a'.repeat(129) } })).rejects.toMatchObject({ body: { code: 'PASSWORD_TOO_LONG' } });
     await authModule.auth.api.resetPassword({ body: { token, newPassword } });
     expect(await (await deviceRequest('/device/token', { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: 'torrents-duck-tv' })).json()).toMatchObject({ error: 'invalid_grant' });
     expect(await authModule.verifyCredentials(email, password)).toBeNull();
@@ -467,8 +469,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('authentication with PostgreSQL'
   it('records native password changes for FTPS connection revocation', async () => {
     const policyRoute = await import('../src/routes/api/internal/ftp-policy/+server');
     const before = await (await policyRoute.GET(event('/api/internal/ftp-policy', undefined, '', true))).json();
-    const replacement = 'Nouveau mot de passe admin 🦆';
+    const replacement = 'ijklmnop';
     const device = await approveDevice(adminCookie);
+    await expect(authModule.auth.api.changePassword({ body: { currentPassword: password, newPassword: 'abcdefg' }, headers: new Headers({ origin, cookie: adminCookie }) })).rejects.toMatchObject({ body: { code: 'PASSWORD_TOO_SHORT' } });
+    await expect(authModule.auth.api.changePassword({ body: { currentPassword: password, newPassword: 'a'.repeat(129) }, headers: new Headers({ origin, cookie: adminCookie }) })).rejects.toMatchObject({ body: { code: 'PASSWORD_TOO_LONG' } });
     await expect(authModule.auth.api.changePassword({ body: { currentPassword: 'wrong', newPassword: replacement }, headers: new Headers({ origin, cookie: adminCookie }) })).rejects.toBeDefined();
     expect((await db.query('SELECT id FROM "deviceCode" WHERE "deviceCode"=$1', [device.device_code])).rows).toHaveLength(1);
     await authModule.auth.api.changePassword({ body: { currentPassword: password, newPassword: replacement, revokeOtherSessions: false }, headers: new Headers({ origin, cookie: adminCookie }) });

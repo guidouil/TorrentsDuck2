@@ -13,7 +13,7 @@ export const POST: RequestHandler = async (event) => {
   const body = await readJsonObject(event.request);
   if (typeof body.username !== 'string' || body.username.length < 1 || body.username.length > 128 || !body.username.trim() || /[\x00-\x1f\x7f]/.test(body.username)) error(400, 'Invalid username');
   if (typeof body.email !== 'string' || body.email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) error(400, 'Invalid email');
-  if (typeof body.password !== 'string' || body.password.length < 12 || body.password.length > 128) error(400, 'Use a password between 12 and 128 characters');
+  if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 128) error(400, 'Use a password between 8 and 128 characters');
   const username = body.username;
   const email = body.email.trim().toLowerCase();
   const isAdmin = email === process.env.ADMIN_EMAIL?.trim().toLowerCase();

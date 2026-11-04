@@ -1,18 +1,21 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { mkdtemp, mkdir, writeFile, readFile, symlink, rm, readdir, utimes } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, symlink, rm, readdir, utimes, lstat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { RequestEvent } from '@sveltejs/kit';
-import { relativePath, resolveFile, listFiles, changeFiles, downloadFile, uploadFile, byteRange, moveWithoutReplacement } from '../src/lib/server/files';
+import { relativePath, resolveFile, listFiles, listStreamingFiles, changeFiles, downloadFile, uploadFile, byteRange, moveWithoutReplacement } from '../src/lib/server/files';
 import { POST } from '../src/routes/api/files/+server';
+import { GET as streaming } from '../src/routes/api/files/streaming/+server';
 
-const mocks = vi.hoisted(() => ({ member: vi.fn(), audit: vi.fn() }));
+const mocks = vi.hoisted(() => ({ member: vi.fn(), audit: vi.fn(), statfs: vi.fn() }));
+vi.mock('node:fs/promises', async (original) => ({ ...await original<typeof import('node:fs/promises')>(), statfs: mocks.statfs }));
 vi.mock('../src/lib/server/permissions', () => ({ requireMember: mocks.member }));
 vi.mock('../src/lib/server/audit', () => ({ audit: mocks.audit }));
 
 let directory: string;
 beforeEach(async () => {
 	vi.resetAllMocks();
+	mocks.statfs.mockResolvedValue({ blocks: 1000, bsize: 1024, bfree: 800, bavail: 800 });
 	directory = await mkdtemp(path.join(os.tmpdir(), 'duck-files-'));
 	process.env.DATA_ROOT = directory;
 	process.env.DOWNLOADS_DIR = path.join(directory, 'downloads');
@@ -24,9 +27,9 @@ beforeEach(async () => {
 });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 
-function event(url: string, options: RequestInit = {}) {
+function event<Route extends '/api/files' | '/api/files/streaming' = '/api/files'>(url: string, options: RequestInit = {}) {
 	const request = new Request(url, options);
-	return { request, url: new URL(url) } as RequestEvent<Record<string, never>, '/api/files'>;
+	return { request, url: new URL(url) } as RequestEvent<Record<string, never>, Route>;
 }
 
 describe('download deletion API', () => {
@@ -57,22 +60,84 @@ describe('download deletion API', () => {
 
 describe('file listing order', () => {
 	it.each([
-		['', ['z-new.txt', 'a-old.txt']],
-		['sort=modifiedAt', ['z-new.txt', 'a-old.txt']],
-		['sort=modifiedAt&order=asc', ['a-old.txt', 'z-new.txt']],
-		['sort=name', ['a-old.txt', 'z-new.txt']],
-		['sort=name&order=desc', ['z-new.txt', 'a-old.txt']],
-		['sort=size', ['a-old.txt', 'z-new.txt']]
-	])('sorts files with %s and keeps folders first', async (options, expected) => {
+		['', ['z-new.txt', 'm-folder', 'a-old.txt']],
+		['sort=modifiedAt', ['z-new.txt', 'm-folder', 'a-old.txt']],
+		['sort=modifiedAt&order=asc', ['a-old.txt', 'm-folder', 'z-new.txt']],
+		['sort=name', ['a-old.txt', 'm-folder', 'z-new.txt']],
+		['sort=name&order=desc', ['z-new.txt', 'm-folder', 'a-old.txt']]
+	])('sorts files and folders together with %s', async (options, expected) => {
 		const root = process.env.SHARE_DIR!;
-		await mkdir(path.join(root, 'folder'));
+		await mkdir(path.join(root, 'm-folder'));
 		await writeFile(path.join(root, 'a-old.txt'), 'old');
 		await writeFile(path.join(root, 'z-new.txt'), 'new content');
-		for (const [name, date] of [['folder', '2024-01-01'], ['a-old.txt', '2025-01-01'], ['z-new.txt', '2026-01-01']]) {
+		for (const [name, date] of [['m-folder', '2025-06-01'], ['a-old.txt', '2025-01-01'], ['z-new.txt', '2026-01-01']]) {
 			await utimes(path.join(root, name), new Date(date), new Date(date));
 		}
 		const list = await listFiles('share', '', new URLSearchParams(options));
-		expect(list.entries.map((entry) => entry.name)).toEqual(['folder', ...expected]);
+		expect(list.entries.map((entry) => entry.name)).toEqual(expected);
+	});
+	it('breaks identical date ties by name regardless of entry type', async () => {
+		const root = process.env.SHARE_DIR!;
+		await mkdir(path.join(root, 'z-folder'));
+		await writeFile(path.join(root, 'a-file'), 'file');
+		for (const name of ['z-folder', 'a-file']) await utimes(path.join(root, name), new Date('2025-01-01'), new Date('2025-01-01'));
+		expect((await listFiles('share', '', new URLSearchParams('sort=modifiedAt'))).entries.map((entry) => entry.name)).toEqual(['a-file', 'z-folder']);
+	});
+	it('returns all entries beyond the paginated limit when explicitly requested', async () => {
+		await Promise.all(Array.from({ length: 505 }, (_, index) => writeFile(path.join(process.env.SHARE_DIR!, `${index}.txt`), 'file')));
+		const all = await listFiles('share', '', new URLSearchParams('all=1&offset=500&limit=1'));
+		expect(all.entries).toHaveLength(505);
+		expect(all).toMatchObject({ total: 505, offset: 0, limit: 505 });
+		const page = await listFiles('share', '', new URLSearchParams('offset=500&limit=1'));
+		expect(page.entries).toHaveLength(1);
+		expect(page).toMatchObject({ total: 505, offset: 500, limit: 1 });
+	});
+});
+
+describe('streaming catalogue', () => {
+	it('includes nested videos, searches their paths and excludes links, empty and temporary files', async () => {
+		const root = process.env.SHARE_DIR!;
+		await mkdir(path.join(root, 'Films'));
+		for (const name of ['Films/Été.MKV', 'Films/music.mp3', 'notes.txt', '.duck-upload-pending.mp4', 'unfinished.mkv.!qB']) await writeFile(path.join(root, name), 'content');
+		await writeFile(path.join(root, 'empty.mp4'), '');
+		await symlink(process.env.DOWNLOADS_DIR!, path.join(root, 'escape'));
+		await symlink(path.join(process.env.DOWNLOADS_DIR!, 'movie.mp4'), path.join(root, 'linked.mp4'));
+		const result = await listStreamingFiles('share');
+		expect(result.total).toBe(1);
+		expect(result.entries[0]).toMatchObject({ name: 'Été.MKV', path: 'Films/Été.MKV', directory: false, size: 7 });
+		expect((await listStreamingFiles('share', 'fILMs/éTé')).total).toBe(1);
+		expect((await listStreamingFiles('share', 'absent')).total).toBe(0);
+	});
+	it('sorts by filesystem creation dates independently of modification dates', async () => {
+		const root = process.env.SHARE_DIR!;
+		await writeFile(path.join(root, 'z-first.mkv'), 'first');
+		await writeFile(path.join(root, 'a-second.mp4'), 'second');
+		await utimes(path.join(root, 'z-first.mkv'), new Date('2031-01-01'), new Date('2031-01-01'));
+		await utimes(path.join(root, 'a-second.mp4'), new Date('2030-01-01'), new Date('2030-01-01'));
+		const expected = await Promise.all(['z-first.mkv', 'a-second.mp4'].map(async (name) => {
+			const stat = await lstat(path.join(root, name));
+			return { name, addedAt: (stat.birthtimeMs > 0 ? stat.birthtime : stat.ctime).toISOString() };
+		}));
+		expected.sort((a, b) => b.addedAt.localeCompare(a.addedAt) || a.name.localeCompare(b.name));
+		const result = await listStreamingFiles('share');
+		expect(result.entries.map(({ name, addedAt }) => ({ name, addedAt }))).toEqual(expected);
+		expect(result.entries.every((entry) => entry.addedAt !== entry.modifiedAt)).toBe(true);
+	});
+	it.each([401, 403])('checks membership before scanning files (%s)', async (status) => {
+		mocks.member.mockRejectedValue({ status });
+		await expect(streaming(event<'/api/files/streaming'>('http://localhost/api/files/streaming'))).rejects.toMatchObject({ status });
+	});
+	it('serves only the requested valid space with private cache headers', async () => {
+		mocks.member.mockResolvedValue({ id: 'catalogue-member', role: 'member' });
+		const response = await streaming(event<'/api/files/streaming'>('http://localhost/api/files/streaming?space=downloads&search=movie'));
+		expect(response.headers.get('cache-control')).toBe('private, no-store');
+		expect(await response.json()).toMatchObject({ total: 1, entries: [{ path: 'movie.mp4' }] });
+		await expect(streaming(event<'/api/files/streaming'>('http://localhost/api/files/streaming?space=invalid'))).rejects.toMatchObject({ status: 400 });
+	});
+	it('fails explicitly rather than silently truncating a scan that exceeds its deadline', async () => {
+		const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(31_000);
+		try { await expect(listStreamingFiles('downloads')).rejects.toMatchObject({ status: 413 }); }
+		finally { now.mockRestore(); }
 	});
 });
 

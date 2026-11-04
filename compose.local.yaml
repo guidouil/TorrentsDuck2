@@ -4,12 +4,13 @@ name: torrentduck-local
 services:
   volumes:
     image: postgres:17-bookworm
-    entrypoint: [sh, -c, 'chown 10000:10000 /data/downloads /data/share /data/studio /config']
+    entrypoint: [sh, -c, 'chown 10000:10000 /data/downloads /data/share /data/studio /data/cache /config']
     network_mode: none
     volumes:
       - downloads:/data/downloads
       - share:/data/share
       - studio:/data/studio
+      - cache:/data/cache
       - qbittorrent:/config
 
   postgres:
@@ -47,6 +48,7 @@ services:
       QBT_URL: http://qbittorrent:8080
       QBT_USERNAME: duck-rpc
       QBT_PASSWORD: local-only-qbittorrent-password
+      TMDB_READ_ACCESS_TOKEN: ${TMDB_READ_ACCESS_TOKEN:-}
       DATA_ROOT: /data
       DOWNLOADS_DIR: /data/downloads
       SHARE_DIR: /data/share
@@ -59,6 +61,7 @@ services:
       - downloads:/data/downloads
       - share:/data/share
       - studio:/data/studio
+      - cache:/data/cache
     networks: [edge, database, rpc]
     depends_on:
       volumes: {condition: service_completed_successfully}
@@ -126,6 +129,7 @@ volumes:
   share:
   studio:
   qbittorrent:
+  cache:
 
 networks:
   edge:

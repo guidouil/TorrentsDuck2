@@ -7,7 +7,7 @@
   import Modal from '#lib/Modal.svelte';
   import Icon from '#lib/Icon.svelte';
   let { data } = $props();
-  type Entry = { name: string; path: string; directory: boolean; size: number; modifiedAt: string };
+  type Entry = { name: string; path: string; directory: boolean; size: number; modifiedAt: string; addedAt?: string };
   type AudioTrack = { id: number; label: string; codec: string };
   const location = $derived(page.shallow?.url ?? page.url);
   const space = $derived(location.searchParams.get('space') === 'share' ? 'share' : 'downloads');
@@ -15,8 +15,7 @@
   const path = $derived(location.searchParams.get('path') ?? '');
   const query = $derived(location.searchParams.get('search') ?? '');
   const sort = $derived(location.searchParams.get('sort') ?? (path ? 'name' : 'modifiedAt'));
-  const requestedOffset = $derived(Number(location.searchParams.get('offset')));
-  const offset = $derived(Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0);
+  const streaming = $derived(location.searchParams.get('view') === 'streaming');
   const parts = $derived(path.split('/').filter(Boolean));
   let entries = $state<Entry[]>([]); let total = $state(0); let loading = $state(true); let busy = $state(false); let error = $state(''); let notice = $state('');
   let filesInput = $state<HTMLInputElement>(); let dialogOpen = $state(false); let operation = $state('mkdir'); let selected = $state<Entry | null>(null); let newName = $state('');
@@ -30,19 +29,25 @@
   let requestNumber = 0;
   const fileIcon = (name: string) => /\.(mp4|m4v|webm|ogv|mkv|mov|avi|mpeg|mpg|wmv|flv|m2ts|mts|vob|3gp)$/i.test(name) ? 'video-file' : /\.(mp3|m4a|ogg|oga|flac|wav|aac|opus|aiff|aif|wma|ape|alac)$/i.test(name) ? 'audio-file' : 'file';
   const fileUrl = (entry: Entry, inline = false, audio = '') => `/api/files/download?${new URLSearchParams({ space, path: entry.path, ...(inline ? { inline: '1', ...(audio ? { audio } : {}) } : {}) })}`;
-  async function loadFiles() { const number = ++requestNumber; loading = true; error = ''; try { const result = await api(`/api/files?${new URLSearchParams({ space, path, search: query, sort, offset: String(offset), limit: '50' })}`); if (number !== requestNumber) return; entries = result.entries; total = result.total; } catch (e) { if (number === requestNumber) error = (e as Error).message; } finally { if (number === requestNumber) loading = false; } }
-  $effect(() => { space; path; query; sort; offset; void loadFiles(); });
-  $effect(() => { space; path; dialogOpen = false; videoOpen = false; linkOpen = false; });
+  async function loadFiles() { const number = ++requestNumber; loading = true; error = ''; entries = []; total = 0; try { const result = await api(streaming ? `/api/files/streaming?${new URLSearchParams({ space, search: query })}` : `/api/files?${new URLSearchParams({ space, path, search: query, sort, all: '1' })}`); if (number !== requestNumber) return; entries = result.entries; total = result.total; } catch (e) { if (number === requestNumber) error = (e as Error).message; } finally { if (number === requestNumber) loading = false; } }
+  $effect(() => {
+    space; path; query; sort; streaming;
+    loading = true;
+    const timer = setTimeout(() => void loadFiles(), query ? 250 : 0);
+    return () => { clearTimeout(timer); requestNumber++; };
+  });
+  $effect(() => { space; path; streaming; dialogOpen = false; videoOpen = false; linkOpen = false; });
   function browse(values: Record<string, string>, replace = false) {
     const url = new URL(location.href);
+    url.searchParams.delete('offset');
     for (const [key, value] of Object.entries(values)) {
       if (value) url.searchParams.set(key, value);
       else url.searchParams.delete(key);
     }
     if (url.href !== location.href) void goto(url, { shallow: true, replace, reset: false });
   }
-  function switchSpace(value: string) { browse({ space: value, path: '', offset: '', search: '' }); }
-  function enter(value: string) { browse({ path: value, offset: '', search: '', sort: '' }); }
+  function switchSpace(value: string) { browse({ space: value, path: '', search: '' }); }
+  function enter(value: string) { browse({ path: value, search: '', sort: '' }); }
   function ask(action: string, entry: Entry | null = null) { operation = action; selected = entry; newName = action === 'rename' && entry ? entry.name : ''; dialogOpen = true; }
   async function mutate(event: SubmitEvent) { event.preventDefault(); busy = true; error = ''; try { await api('/api/files', { method: 'POST', body: JSON.stringify({ action: operation, space, path: selected?.path ?? path, name: newName, confirm: operation === 'delete' }) }); dialogOpen = false; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   async function upload(event: Event) { const input = event.currentTarget as HTMLInputElement; if (!input.files?.length) return; const uploadPath = path; busy = true; error = ''; notice = ''; try { for (const file of Array.from(input.files)) { notice = `${$t.uploading} ${file.name}…`; const body = new FormData(); body.set('file', file); body.set('action', 'upload'); await api(`/api/files?${new URLSearchParams({ space: 'share', path: uploadPath })}`, { method: 'POST', body }); } notice = $t.uploaded; await loadFiles(); } catch (e) { error = (e as Error).message; } finally { busy = false; input.value = ''; } }
@@ -56,7 +61,7 @@
     if (/iPhone|iPad|iPod/i.test(userAgent) || (/Macintosh/i.test(userAgent) && maxTouchPoints > 1)) return `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(url)}`;
     return '';
   }
-  async function makeLink(entry: Entry) { busy = true; error = ''; try { link = await api('/api/files/share', { method: 'POST', body: JSON.stringify({ space, path: entry.path }) }); vlcLink = mobileVlcUrl(link.url, entry.name); linkOpen = true; } catch (e) { error = (e as Error).message; } finally { busy = false; } }
+  async function makeLink(entry: Entry, launch = false) { busy = true; error = ''; try { link = await api('/api/files/share', { method: 'POST', body: JSON.stringify({ space, path: entry.path }) }); vlcLink = mobileVlcUrl(link.url, entry.name); linkOpen = true; if (launch) { if (vlcLink) window.location.assign(vlcLink); else downloadPlaylist(); } } catch (e) { error = (e as Error).message; } finally { busy = false; } }
   function canPlayAudio(codec: string) {
     const mime = codec.startsWith('A_AAC') ? 'audio/mp4; codecs="mp4a.40.2"' : ({ A_OPUS: 'audio/webm; codecs="opus"', A_VORBIS: 'audio/webm; codecs="vorbis"', 'A_MPEG/L3': 'audio/mpeg', A_FLAC: 'audio/flac', A_AC3: 'audio/mp4; codecs="ac-3"', A_EAC3: 'audio/mp4; codecs="ec-3"' } as Record<string, string>)[codec];
     return !!mime && !!player?.canPlayType(mime);
@@ -102,23 +107,44 @@
 <h1 class="sr-only">{$t.files}</h1>
 <input class="sr-only" type="file" multiple bind:this={filesInput} onchange={upload} aria-label={$t.upload} />
 <section class="panel explorer-panel" aria-label={$t.files}>
+  <div class="view-toolbar">
+    <div class="tabs view-tabs" aria-label={$t.fileView}>
+      <button class={{ selected: !streaming }} aria-pressed={!streaming} disabled={busy} onclick={() => browse({ view: '' })}><Icon name="files" size={18} />{$t.explorer}</button>
+      <button class={{ selected: streaming }} aria-pressed={streaming} disabled={busy} onclick={() => browse({ view: 'streaming' })}><Icon name="play" size={18} />{$t.streaming}</button>
+    </div>
+    {#if streaming}<span class="muted">{$t.newestAddedFirst}</span>{/if}
+  </div>
   <div class="toolbar explorer-toolbar">
     <div class="tabs" aria-label={$t.files}>
       <button class={{ selected: space === 'downloads' }} aria-pressed={space === 'downloads'} title={data.user?.role === 'admin' ? $t.downloadsAdminDescription : $t.downloadsDescription} disabled={busy} onclick={() => switchSpace('downloads')}><Icon name="download" size={18} />{$t.downloads}</button>
       <button class={{ selected: space === 'share' }} aria-pressed={space === 'share'} title={$t.shareDescription} disabled={busy} onclick={() => switchSpace('share')}><Icon name="folder" size={18} />{$t.shared}</button>
     </div>
-    <input class="search" type="search" placeholder={$t.search} aria-label={$t.search} value={query} oninput={(event) => browse({ search: event.currentTarget.value, offset: '' }, Boolean(query))} />
-    <select aria-label={$t.sort} value={sort} onchange={(event) => browse({ sort: event.currentTarget.value, offset: '' })}><option value="name">{$t.name}</option><option value="modifiedAt">{$t.date}</option><option value="size">{$t.size}</option></select>
+    <input class="search" type="search" placeholder={$t.search} aria-label={$t.search} value={query} oninput={(event) => browse({ search: event.currentTarget.value }, Boolean(query))} />
+    {#if !streaming}<select aria-label={$t.sort} value={sort} onchange={(event) => browse({ sort: event.currentTarget.value })}><option value="name">{$t.name}</option><option value="modifiedAt">{$t.date}</option><option value="size">{$t.size}</option></select>{/if}
   </div>
-  <div class="explorer-location">
+  {#if streaming}<p class="streaming-help">{$t.streamingHelp}</p>{:else}<div class="explorer-location">
     <div class="breadcrumbs" aria-label={$t.path}><button disabled={busy} onclick={() => enter('')}>{space === 'downloads' ? $t.downloads : $t.shared}</button>{#each parts as part, i (parts.slice(0, i + 1).join('/'))}<span>/</span><button disabled={busy} onclick={() => enter(parts.slice(0, i + 1).join('/'))} aria-current={i === parts.length - 1 ? 'location' : undefined}>{part}</button>{/each}</div>
     <div class="file-actions"><button type="button" class="secondary" onclick={() => { ftpsOpen = true; }}>{$t.ftpsHelp}</button>{#if space === 'share'}<button class="secondary" disabled={busy} onclick={() => ask('mkdir')}><Icon name="plus" size={18} />{$t.newFolder}</button><button class="primary" disabled={busy} onclick={() => filesInput?.click()}><Icon name="upload" size={18} />{$t.upload}</button>{/if}</div>
   </div>
+  {/if}
   <Notification bind:message={error} kind="error" /><Notification bind:message={notice} kind="info" />
 {#if loading}
   <div class="empty"><p>{$t.loadingPage}</p></div>
 {:else if !entries.length}
-  <div class="empty"><p>{query ? $t.noResults : $t.emptyFolder}</p></div>
+  <div class="empty"><p>{query ? $t.noResults : streaming ? $t.noVideos : $t.emptyFolder}</p></div>
+{:else if streaming}
+  <div class="poster-grid">
+    {#each entries as entry (entry.path)}
+      <button class="poster-card" disabled={busy} onclick={() => makeLink(entry, true)} title={`${$t.share} · ${entry.path}`} aria-label={`${$t.share} : ${entry.name}`}>
+        <span class="poster-art">
+          <img src={`/api/files/cover?${new URLSearchParams({ space, path: entry.path })}`} alt="" width="300" height="450" loading="lazy" decoding="async" onerror={(event) => { if (event.currentTarget.getAttribute('src') !== '/cover-placeholder.svg') event.currentTarget.setAttribute('src', '/cover-placeholder.svg'); }} />
+          <span class="poster-play"><Icon name="cone" size={24} />{$t.share}</span>
+        </span>
+        <strong>{entry.name}</strong>
+        <span class="poster-meta"><time datetime={entry.addedAt} title={new Date(entry.addedAt ?? entry.modifiedAt).toLocaleString($language)}>{new Date(entry.addedAt ?? entry.modifiedAt).toLocaleDateString($language)}</time><span>{bytes(entry.size)}</span></span>
+      </button>
+    {/each}
+  </div>
 {:else}
   <div class="table-wrap">
     <!-- Preserve table semantics when CSS displays rows as cards. -->
@@ -130,7 +156,7 @@
           <tr role="row">
             <td class="name-cell" role="cell">{#if entry.directory}<button class="file-link" disabled={busy} onclick={() => enter(entry.path)}><span class="file-glyph"><Icon name="folder" size={24} /></span><span class="truncate">{entry.name}</span></button>{:else}<a href={fileUrl(entry)} class="file-link"><span class="file-glyph"><Icon name={fileIcon(entry.name)} size={24} /></span><span class="truncate">{entry.name}</span></a>{/if}</td>
             <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.size}</span>{entry.directory ? '—' : bytes(entry.size)}</td>
-            <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.date}</span>{new Date(entry.modifiedAt).toLocaleDateString($language)}</td>
+            <td class="muted" role="cell"><span class="mobile-label" aria-hidden="true">{$t.date}</span><time datetime={entry.modifiedAt}>{new Date(entry.modifiedAt).toLocaleString($language)}</time></td>
             <td class="actions-cell" role="cell"><div class="row-actions">{#if !entry.directory}{#if fileIcon(entry.name) === 'video-file'}<a class="icon-button" title={$t.studio.createClip} aria-label={$t.studio.createClip} href={`/studio?${new URLSearchParams({ space, path: entry.path })}`}><Icon name="edit" size={22} /><span class="action-label">{$t.studio.createClip}</span></a>{/if}<a class="icon-button" title={$t.download} aria-label={$t.download} href={fileUrl(entry)}><Icon name="download" size={22} /><span class="action-label">{$t.download}</span></a>{#if /\.(mp4|m4v|webm|ogv|mkv|mov|avi|m4a|mp3|ogg|flac)$/i.test(entry.name)}<button class="icon-button" title={$t.play} aria-label={$t.play} onclick={() => openVideo(entry)}><Icon name="play" size={22} /><span class="action-label">{$t.play}</span></button><button class="icon-button warning" title={$t.share} aria-label={$t.share} disabled={busy} onclick={() => makeLink(entry)}><Icon name="cone" size={22} /><span class="action-label">{$t.share}</span></button>{/if}{/if}{#if space === 'share'}<button class="icon-button" title={$t.rename} aria-label={$t.rename} disabled={busy} onclick={() => ask('rename', entry)}><Icon name="edit" size={22} /><span class="action-label">{$t.rename}</span></button>{/if}{#if canDelete}<button class="icon-button danger" title={$t.delete} aria-label={$t.delete} disabled={busy} onclick={() => ask('delete', entry)}><Icon name="trash" size={22} /><span class="action-label">{$t.delete}</span></button>{/if}</div></td>
           </tr>
         {/each}
@@ -138,7 +164,9 @@
     </table>
   </div>
 {/if}
-<div class="panel-bottom"><span>{total} {$t.items} · {$t.ftpsPort}</span><div class="pagination"><button aria-label={$t.previous} disabled={busy || loading || offset === 0} onclick={() => browse({ offset: String(Math.max(0, offset - 50)) })}><Icon name="chevron-left" size={18} /></button><span>{Math.floor(offset / 50) + 1} / {Math.max(1, Math.ceil(total / 50))}</span><button aria-label={$t.next} disabled={busy || loading || offset + 50 >= total} onclick={() => browse({ offset: String(offset + 50) })}><Icon name="chevron-right" size={18} /></button></div></div></section>
+<div class="panel-bottom"><span>{total} {streaming ? $t.videos : $t.items}{#if !streaming} · {$t.ftpsPort}{/if}</span></div>
+{#if streaming}<details class="cover-credits"><summary>{$t.coverCredits}</summary><a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer"><img src="/tmdb-logo.svg" width="137" height="18" alt="TMDB" /></a><p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p></details>{/if}
+</section>
 <Modal bind:open={dialogOpen} title={operation === 'mkdir' ? $t.newFolder : operation === 'rename' ? $t.rename : $t.delete}><form onsubmit={mutate} class="form-stack">{#if operation === 'delete'}<p>{$t.deleteFileBefore} {selected?.name} {$t.deleteFileAfter}</p>{:else}<label>{$t.name}<input required bind:value={newName} maxlength={240} /></label>{/if}<div class="dialog-actions"><button type="button" class="secondary" onclick={() => { dialogOpen = false; }}>{$t.cancel}</button><button class={['primary', { destructive: operation === 'delete' }]} disabled={busy}>{operation === 'delete' ? $t.deletePermanently : $t.save}</button></div></form></Modal>
 <Modal bind:open={videoOpen} title={video?.name ?? $t.play} wide={true}>
   {#if video && videoOpen}
@@ -158,7 +186,7 @@
     <div class="dialog-actions"><a class="button secondary" href={fileUrl(video)}>{$t.download}</a><button class="primary" disabled={busy} onclick={() => video && makeLink(video)}>{$t.share}</button></div>
   {/if}
 </Modal>
-<Modal bind:open={linkOpen} title={$t.share}>{#if link}<p>{$t.linkExpires} {new Date(link.expiresAt).toLocaleString($language)}. {$t.linkPrivate}</p>{#if vlcLink}<p>{$t.vlcMobileHelp}</p>{/if}<div class="token-box">{link.url}</div><div class="dialog-actions"><button class="secondary danger" onclick={revoke}>{$t.revoke}</button><button class="secondary" onclick={copyLink}>{$t.copy}</button><button class={vlcLink ? 'secondary' : 'primary'} onclick={downloadPlaylist}>{$t.vlcPlaylist}</button>{#if vlcLink}<a class="button primary" href={vlcLink}>{$t.share}</a>{/if}</div>{/if}</Modal>
+<Modal bind:open={linkOpen} title={$t.share}>{#if link}{#if streaming && !vlcLink}<p>{$t.streamingDesktopHelp}</p>{/if}<p>{$t.linkExpires} {new Date(link.expiresAt).toLocaleString($language)}. {$t.linkPrivate}</p>{#if vlcLink}<p>{$t.vlcMobileHelp}</p>{/if}<div class="token-box">{link.url}</div><div class="dialog-actions"><button class="secondary danger" onclick={revoke}>{$t.revoke}</button><button class="secondary" onclick={copyLink}>{$t.copy}</button><button class={vlcLink ? 'secondary' : 'primary'} onclick={downloadPlaylist}>{$t.vlcPlaylist}</button>{#if vlcLink}<a class="button primary" href={vlcLink}>{$t.share}</a>{/if}</div>{/if}</Modal>
 <Modal bind:open={ftpsOpen} title={$t.ftpsTitle}>
   <p>{$t.ftpsInstructions}</p>
   <dl class="ftps-settings">
@@ -173,6 +201,22 @@
   <div class="dialog-actions"><button type="button" class="primary" onclick={() => { ftpsOpen = false; }}>{$t.close}</button></div>
 </Modal>
 <style>
+  .view-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:12px;border-bottom:1px solid var(--line)}
+  .view-toolbar>span{font-size:12px}
+  .streaming-help{margin:0;padding:8px 16px 16px;color:var(--muted);font-size:13px;line-height:1.5}
+  .poster-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:24px 16px;padding:12px 16px 24px}
+  .poster-card{display:flex;flex-direction:column;gap:10px;min-width:0;padding:0;text-align:left;background:transparent;color:var(--text);border-radius:var(--shape-md)}
+  .poster-card:focus-visible{outline:2px solid var(--accent);outline-offset:5px}
+  .poster-art{position:relative;display:block;aspect-ratio:2/3;width:100%;overflow:hidden;background:var(--surface-container);border-radius:var(--shape-md)}
+  .poster-art>img{display:block;width:100%;height:100%;object-fit:cover}
+  .poster-play{position:absolute;inset:auto 0 0;display:flex;align-items:center;justify-content:center;gap:6px;padding:12px 4px;background:#000c;color:#fff;font-size:12px}
+  .poster-card:hover .poster-play,.poster-card:focus-visible .poster-play{background:var(--primary-container);color:var(--on-primary-container)}
+  .poster-card strong{font-size:13px;line-height:1.5;overflow-wrap:anywhere;width:100%}
+  .poster-meta{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;width:100%;font-size:11px;color:var(--muted)}
+  .cover-credits{padding:12px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+  .cover-credits summary{cursor:pointer;min-height:32px;align-content:center}
+  .cover-credits img{display:block;margin:12px 0}
+  .cover-credits p{margin-bottom:0}
   .audio-selector{display:flex;flex-direction:column;gap:8px;margin-top:12px}
   .audio-selector select{width:100%;min-width:0;min-height:44px}
   .explorer-panel{display:flex;flex-direction:column;min-height:calc(100dvh - 44px);border-radius:var(--shape-lg)}
@@ -198,8 +242,6 @@
   .mobile-label,.action-label{display:none}
   .row-actions .icon-button{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;padding:6px}
   .panel-bottom{margin-top:auto;padding:8px 12px;gap:8px}
-  .pagination{gap:8px}
-  .pagination button{min-width:34px;min-height:34px;padding:6px}
   .empty{flex:1;padding:40px 16px}
   .ftps-settings{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 16px;font-size:13px;line-height:1.6}
   .ftps-settings dt{color:var(--muted)}
@@ -208,6 +250,11 @@
     .explorer-panel{min-height:calc(100dvh - 180px)}
   }
   @media(max-width:700px){
+    .view-toolbar{padding:8px 0}
+    .view-tabs{width:100%}
+    .poster-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 12px;padding:12px 0 24px}
+    .streaming-help{padding:8px 0 12px}
+    .cover-credits{padding:12px 0}
     .explorer-toolbar{gap:8px;padding:8px 0}
     .tabs{width:100%}
     .tabs button{flex:1;min-width:0;min-height:44px;padding:8px}
@@ -232,7 +279,5 @@
     .row-actions:empty{display:none}
     .actions-cell:has(.row-actions:empty){display:none}
     .row-actions .icon-button{min-width:44px;min-height:44px}
-    .pagination{margin-left:auto}
-    .pagination button{min-width:44px;min-height:44px}
   }
 </style>

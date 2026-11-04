@@ -105,8 +105,11 @@ Edit `.env` with a text editor. Run `openssl rand -hex 32` again for each secret
 | `QBT_PEER_PORT` | `42420` by default; an integer from `1024` to `65535`, available on the host. The same TCP/UDP port is used by the qBittorrent engine and published by Docker. |
 | `ACME_EMAIL` | Certificate contact address, for example `admin@example.com`. |
 | `ADMIN_EMAIL` | Email of the future administrator signing up, for example `admin@example.com`; an empty value disables automatic assignment. |
+| `TMDB_READ_ACCESS_TOKEN` | Optional TMDB API Read Access Token for movie posters, kept only in `web`. Empty: generic poster. |
 
 Configure email before opening the service: `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM` and `MAILGUN_API_URL` (`https://api.mailgun.net` for the US region, `https://api.eu.mailgun.net` for Europe). The sending domain must be verified in Mailgun. Without a Mailgun key, use the `SMTP_*` variables described in the [README](../README.md). Email is used for address verification, password resets and registration notifications.
+
+For **Files → Streaming** posters, obtain the token from your [TMDB API settings](https://www.themoviedb.org/settings/api) ([official authentication guide](https://developer.themoviedb.org/docs/authentication-application)), then recreate `web` after editing `.env`. Posters are cached in the host’s `DATA_ROOT/cache/covers` (`/data/cache/covers` inside `web`); this private mount is unavailable through FTPS or Nginx. Deployment initializes `cache` with owner `10000:10000` and mode `0700`. The cache is limited to 256 entries: successful results last 30 days, misses 24 hours and errors 5 minutes before another on-demand lookup. It can be regenerated and is excluded from backups. Streaming displays the TMDB credit and logo as required by its [attribution terms](https://developer.themoviedb.org/docs/faq).
 
 Create an A record for `duck.example.com` pointing to the server's IPv4 in your domain's DNS zone. Wait for propagation before requesting the certificate. Publish an AAAA record only after preparing and testing IPv6; the torrent engine is restricted to IPv4.
 
@@ -116,6 +119,7 @@ Check that subnets `172.30.10.0/24`, `172.30.11.0/24`, `172.30.20.0/24`, `172.30
 
 ```sh
 sudo install -d -o 10000 -g 10000 -m 755 /srv/torrentduck/downloads /srv/torrentduck/share /srv/torrentduck/qbittorrent /srv/torrentduck/studio
+sudo install -d -o 10000 -g 10000 -m 700 /srv/torrentduck/cache
 sudo install -d -m 700 /srv/torrentduck/postgres /srv/torrentduck/certificates /srv/torrentduck/ftp-tls
 sudo install -d -m 755 /srv/torrentduck/acme
 sudo docker compose config -q
@@ -179,6 +183,7 @@ Before opening access to members:
 - On Search, run a query, add a result to transfers and check failures from an unavailable source. Grant and revoke the Source manager permission on a member: source administration must work only while granted, without access to accounts or backups. Also check that the APIs reject ordinary, pending and disabled members.
 - In a signed-out browser, display the login QR code and scan it with a phone. Check that signing in on the phone returns to confirmation, compare the codes, explicitly approve, and verify that the first browser signs in automatically. Also test denial and expiry after five minutes; pending or disabled accounts must not be able to approve a device. Use the same HTTPS site address on both devices.
 - Sign in to the same account in several browsers, including the TV, then sign out from one: all its web access must be denied immediately and open screens must return to sign-in within a few seconds. Check that an approved but unused QR code cannot reconnect the TV and that another account stays signed in.
+- In **Files**, check name/date sorting across both folders and files and a folder with more than 50 entries without pagination. In **Streaming**, check subfolders, newest-first order, a TMDB poster and the generic fallback without a token or match; restart `web` and check that cached posters remain available. Test mobile VLC opening and opening a desktop `.m3u` playlist with VLC.
 - Test video seeking, a VLC link, its revocation and expiration, and a format unsupported by the browser. On Android, iPhone and iPad (including desktop mode), check the “Open in VLC” button in the link dialog with VLC installed; also check that copying the link remains available without VLC.
 - With a MKV containing several audio tracks, check the web player's “Audio track” selector, particularly the French dub and resuming at the same position in Brave. Audio codecs must be supported by the browser; prefer VLC on phones and tablets. Selection reorders streamed track headers while preserving media data and positions: these requests use Node even with Nginx file delivery, without changing the shared file or requiring FFmpeg in `web`.
 - On the website, check that an active, approved administrator can delete a file or folder from `downloads` after confirmation and that an ordinary member cannot, including through the API. Deletion is permanent for the whole community; files still managed by qBittorrent may be reported missing or downloaded again.

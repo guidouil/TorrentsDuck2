@@ -6,8 +6,8 @@ async function main(): Promise<void> {
   const username = process.env.ADMIN_USERNAME;
   const email = process.env.ADMIN_EMAIL?.toLowerCase();
   const password = process.env.ADMIN_PASSWORD;
-  if (!username?.trim() || username.length > 128 || /[\x00-\x1f\x7f]/.test(username) || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password || password.length < 12 || password.length > 128) {
-    throw new Error('Set ADMIN_USERNAME, ADMIN_EMAIL and ADMIN_PASSWORD (12–128 characters) in the process environment');
+  if (!username?.trim() || username.length > 128 || /[\x00-\x1f\x7f]/.test(username) || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password || password.length < 8 || password.length > 128) {
+    throw new Error('Set ADMIN_USERNAME, ADMIN_EMAIL and ADMIN_PASSWORD (8–128 characters) in the process environment');
   }
   const hash = await hashPassword(password);
   const id = randomUUID();
