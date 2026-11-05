@@ -210,7 +210,7 @@
   });
 </script>
 
-<svelte:head><title>{project?.name ?? $t.studio.title} · Duck Studio</title></svelte:head>
+<svelte:head><title>{project?.name ?? $t.studio.title} · {$t.studio.title}</title></svelte:head>
 <h1 class="sr-only">{project?.name ?? $t.studio.title}</h1>
 <Notification bind:message={error} kind="error" />
 <Notification bind:message={notice} />

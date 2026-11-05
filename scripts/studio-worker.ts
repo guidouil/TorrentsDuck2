@@ -8,7 +8,7 @@ process.once('SIGINT', stop);
 try {
 	await runStudioWorker(controller.signal);
 } catch {
-	console.error('Duck Studio : moteur arrêté. Vérifiez PostgreSQL et la disponibilité du moteur unique.');
+	console.error('Studio : moteur arrêté. Vérifiez PostgreSQL et la disponibilité du moteur unique.');
 	process.exitCode = 1;
 } finally {
 	process.removeListener('SIGTERM', stop);

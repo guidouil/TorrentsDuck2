@@ -465,6 +465,9 @@ dialog p { overflow-wrap: anywhere; font-size: 14px; color: var(--muted); line-h
   .chat-entry p { margin-inline-start: 6px; }
   .chat-form { padding-inline: 0; background: transparent; border-top: 1px solid var(--line); }
 }
+@media (max-width: 700px) and (orientation: portrait) {
+  .sidebar nav a[href="/studio"] { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation: none !important; }
 }

@@ -292,7 +292,7 @@ retirées ou désactivées restent dans cet état après redémarrage. La pile
 indexeurs Internet. Les sources URL utilisent la sortie réseau de `web` ; les
 tests locaux restent fondés sur des réponses simulées.
 
-## Duck Studio
+## Studio
 
 Le Studio assemble une seule piste vidéo à partir des fichiers existants de `downloads` et `share`, dans la limite de **300 secondes au total**. Il conserve les originaux et propose les formats 16:9 et 9:16, le cadrage manuel, la piste audio d'origine, les titres et l'import SRT. Les horaires SRT concernent le montage final ; leur texte et leurs horaires sont modifiables avant incrustation. Les exports sont des MP4 H.264/AAC en 1080p. Les aperçus basse résolution sont préparés à la demande pour les passages choisis, sans convertir automatiquement un film entier. La transcription automatique et la publication directe sur YouTube/TikTok sont exclues.
 

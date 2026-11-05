@@ -280,7 +280,7 @@ The `compose.local.yaml` stack keeps qBittorrent on an internal network without
 Internet indexer access. URL sources use the `web` network connection; local tests
 still use simulated responses.
 
-## Duck Studio
+## Studio
 
 Studio assembles a single video track from existing `downloads` and `share` files, limited to **300 seconds in total**. It preserves sources and supports 16:9 and 9:16, manual cropping, the original audio track, titles and SRT imports. SRT timecodes refer to the final montage; text and timecodes can be edited before burning subtitles into the image. Exports are H.264/AAC MP4 files in 1080p. Low-resolution previews of selected passages are prepared on demand, without automatically converting a whole film. Automatic transcription and direct YouTube/TikTok publishing are excluded.
 

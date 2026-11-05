@@ -16,7 +16,7 @@ The entire project was orchestrated with **OpenAI Sol 6.1 Ultra**.
 
 - **Collective torrents**: search and manage shared transfers through qBittorrent.
 - **Shared library**: browse, download and create revocable playback links, with VLC integration.
-- **Duck Studio**: privately assemble short clips, crop for horizontal or vertical video, add titles and SRT subtitles, then export or share an MP4.
+- **Studio**: privately assemble short clips, crop for horizontal or vertical video, add titles and SRT subtitles, then export or share an MP4.
 - **Web and FTPS access**: the same file spaces, available to active, approved accounts.
 - **Community administration**: registration approval, account management and a dedicated permission for managing search sources.
 - **TV sign-in**: approve a QR code from a phone without typing a password on the TV.
@@ -82,7 +82,7 @@ In the file browser, “Open in VLC” prepares a revocable playback link valid 
 
 The web player's **Audio track** selector lists a MKV's languages and track names. On desktop, including Brave, changing tracks keeps the current position, pause state and volume so you can check a French dub's synchronization. Tracks whose audio codec the browser cannot decode require VLC; VLC is also recommended on phones and tablets. Selection changes only the streamed MKV headers, without modifying the shared file or re-encoding its media. Unusual MKV headers that cannot be read safely also fall back to VLC.
 
-### Duck Studio
+### Studio
 
 Open **Studio**, or choose **Create a clip** in the library. Follow the three sections: add videos, choose passages, then export. A project assembles passages from one or several existing videos on a single track, up to five minutes in total. Browse the entire source with the seek slider or the ±10-second buttons, then mark the start and end of each passage. **Play clip** previews only the selected passage. Choose 16:9 or 9:16; collapsible sections hold optional audio, crop and title settings, thumbnails and SRT subtitles. Imported subtitles use the final montage timeline and are burned into the exported image.
 
@@ -90,7 +90,7 @@ Projects, previews and exports are private. Download the H.264/AAC MP4 in 1080p,
 
 To add a French soundtrack to a whole film, select its source in Studio, enter the public YouTube link in the French audio section, then choose **Download YouTube audio**. This first task prepares a private AAC/M4A soundtrack. The dual player then shows the whole source video with the downloaded audio underneath: play, pause and seek both tracks together, slow playback down and adjust the offset in 0.01- or 0.1-second steps, or enter a precise value from −600 to +600 seconds. Positive values delay French audio and negative values advance it. The source video must be playable in your browser for this alignment step. Choose **Create movie with this alignment** once satisfied; the export reuses the prepared audio without downloading it again and creates a private MKV with the original video copied without re-encoding, the original audio retained and French selected by default. This operation uses the whole film, independently of the montage and its five-minute limit. Both copies must use the same cut; a fixed offset cannot repair missing scenes or a gradually drifting soundtrack. Download the MKV for VLC or explicitly publish it to `share`.
 
-The separate `studio` service processes one task at a time, limited initially to one CPU and 4 GiB. Queued tasks persist across restarts; interrupted tasks fail and can be restarted. The 10% disk reserve also applies to the private studio volume. The [deployment guide](docs/deployment.en.md#duck-studio) covers storage, performance checks and backup limits. There is no automatic transcription or direct YouTube/TikTok publishing.
+The separate `studio` service processes one task at a time, limited initially to one CPU and 4 GiB. Queued tasks persist across restarts; interrupted tasks fail and can be restarted. The 10% disk reserve also applies to the private studio volume. The [deployment guide](docs/deployment.en.md#studio) covers storage, performance checks and backup limits. There is no automatic transcription or direct YouTube/TikTok publishing.
 
 ### Search and sources
 

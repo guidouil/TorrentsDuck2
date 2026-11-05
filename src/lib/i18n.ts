@@ -3,7 +3,7 @@ export const language = writable<'fr' | 'en'>('fr');
 const dictionary = {
   fr: {
     studio: {
-      title: "Duck Studio",
+      title: "Studio",
       intro: "Créez un extrait ou ajoutez une bande son française depuis YouTube à votre film entier.",
       createClip: "Créer un extrait",
       newProject: "Nouveau projet",
@@ -423,7 +423,7 @@ const dictionary = {
   },
   en: {
     studio: {
-      title: "Duck Studio",
+      title: "Studio",
       intro: "Create a clip or add a French soundtrack from YouTube to your entire movie.",
       createClip: "Create a clip",
       newProject: "New project",
