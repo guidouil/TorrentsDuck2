@@ -15,15 +15,20 @@ sudo sh -s <<'ROOT'
 set -eu
 cleanup() {
   docker image prune -f --filter label=com.docker.compose.project=torrentduck
-  docker builder prune -af --keep-storage 1GB
 }
 trap 'result=$?; trap - EXIT; cleanup; exit "$result"' EXIT
 cleanup
 docker_root=$(docker info --format '{{.DockerRootDir}}')
-set -- $(df -Pk "$docker_root" | awk 'NR == 2 {print $2, $4}')
-if test "$#" != 2 || test "$2" -lt "$(($1 / 10 + 5242880))"; then
-  echo 'Not enough Docker disk space: keep 10% free plus 5 GiB for the build.' >&2
-  exit 1
+has_build_space() {
+  set -- $(df -Pk "$docker_root" | awk 'NR == 2 {print $2, $4}')
+  test "$#" = 2 && test "$2" -ge "$(($1 / 10 + 5242880))"
+}
+if ! has_build_space; then
+  docker builder prune -af --keep-storage 1GB
+  if ! has_build_space; then
+    echo 'Not enough Docker disk space: keep 10% free plus 5 GiB for the build.' >&2
+    exit 1
+  fi
 fi
 sh scripts/deploy.sh
 # Render the bind-mounted Nginx template even when its image has not changed.

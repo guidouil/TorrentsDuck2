@@ -30,9 +30,9 @@ guardian = load("ftp_guardian", "ftp/guardian.py")
 
 
 class Services(unittest.TestCase):
-    def test_update_checks_disk_and_preserves_cleanup_and_failures(self):
+    def test_update_preserves_cache_unless_disk_is_low_and_keeps_failure_status(self):
         source = (Path(__file__).resolve().parents[1] / "scripts/update.sh").read_text()
-        for scenario in ["success", "dirty", "staged", "untracked", "locked", "low-disk", "failed-deploy", "failed-health"]:
+        for scenario in ["success", "dirty", "staged", "untracked", "locked", "low-disk", "reclaimed-disk", "failed-deploy", "failed-health"]:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 executable = root / "bin"
@@ -57,12 +57,15 @@ esac
                     "df": '''#!/bin/sh
 echo "df $*" >> "$CALLS"
 echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
-echo "fixture 100000000 0 $DISK_AVAILABLE 0% /fixture/docker"
+available=$DISK_AVAILABLE
+if test "$SCENARIO" = reclaimed-disk && test -f "$CACHE_PRUNED"; then available=15242880; fi
+echo "fixture 100000000 0 $available 0% /fixture/docker"
 ''',
                     "docker": '''#!/bin/sh
 echo "docker $*" >> "$CALLS"
 case "$*" in
   info*) echo /fixture/docker;;
+  "builder prune -af --keep-storage 1GB") touch "$CACHE_PRUNED";;
   "compose exec -T web node --input-type=module -")
     cat > "$HEALTH_SCRIPT"
     if test "$SCENARIO" = failed-health; then exit 38; fi
@@ -77,7 +80,8 @@ esac
                 environment = {
                     **os.environ, "PATH": str(executable) + ":" + os.environ["PATH"],
                     "CALLS": str(calls), "HEALTH_SCRIPT": str(root / "health.js"), "SCENARIO": scenario,
-                    "DISK_AVAILABLE": "15242879" if scenario == "low-disk" else "15242880",
+                    "DISK_AVAILABLE": "15242879" if scenario in ["low-disk", "reclaimed-disk"] else "15242880",
+                    "CACHE_PRUNED": str(root / "cache-pruned"),
                     "DEPLOY_EXIT": "37" if scenario == "failed-deploy" else "0",
                 }
                 result = subprocess.run(["sh", str(script)], env=environment, capture_output=True, text=True)
@@ -91,8 +95,16 @@ esac
                 cleanup = "docker image prune -f --filter label=com.docker.compose.project=torrentduck"
                 cache_cleanup = "docker builder prune -af --keep-storage 1GB"
                 self.assertEqual(commands.count(cleanup), 2)
-                self.assertEqual(commands.count(cache_cleanup), 2)
-                self.assertEqual(commands[-2:], [cleanup, cache_cleanup])
+                self.assertEqual(commands[-1], cleanup)
+                disk_check = "df -Pk /fixture/docker"
+                if scenario in ["low-disk", "reclaimed-disk"]:
+                    self.assertEqual(commands.count(cache_cleanup), 1)
+                    self.assertEqual(commands.count(disk_check), 2)
+                    self.assertLess(commands.index(disk_check), commands.index(cache_cleanup))
+                    self.assertEqual(commands[commands.index(cache_cleanup) + 1], disk_check)
+                else:
+                    self.assertNotIn(cache_cleanup, commands)
+                    self.assertEqual(commands.count(disk_check), 1)
                 self.assertFalse(any("volume" in command or "system prune" in command or "backup" in command for command in commands))
                 self.assertLess(commands.index("git pull --ff-only"), commands.index("sudo sh -s"))
                 self.assertLess(commands.index(cleanup), commands.index("df -Pk /fixture/docker"))
