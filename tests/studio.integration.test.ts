@@ -98,16 +98,18 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('Studio with PostgreSQL', () => 
 		const created = await studio.createStudioProject(owner, 'Montage');
 		const edit = initialEdit();
 		await studio.updateStudioProject(owner, created.id, { ...edit });
-		const job = await studio.createStudioJob(owner, created.id, { kind: 'export' });
+		const job = await studio.createStudioJob(owner, created.id, { kind: 'export', format: 'mkv' });
+		expect(job.format).toBe('mkv');
 		edit.clips[0].title = 'Nouveau titre';
 		await studio.updateStudioProject(owner, created.id, { ...edit, aspect: '9:16', subtitles: '' });
 		const { rows: [stored] } = await db!.query<{ input: StudioJobInput }>('SELECT input FROM studio_jobs WHERE id=$1', [job.id]);
+		expect(stored.input.format).toBe('mkv');
 		expect(stored.input.project).toMatchObject({ aspect: '16:9', subtitles: initialEdit().subtitles });
 		expect(stored.input.project.clips[0]).toMatchObject({ title: 'Premier extrait', fingerprint: clip.fingerprint, start: 10, end: 15 });
 		expect((await studio.ownedStudioProject(owner, created.id)).clips[0].title).toBe('Nouveau titre');
 		expect((await studio.ownedStudioJob(owner, created.id, job.id)).status).toBe('queued');
 	});
-	it('migrates the old job constraint and persists full-source dubbing without montage clips', async () => {
+	it('migrates the old job constraint and persists dubbing and YouTube downloads without montage clips', async () => {
 		const project = await studio.createStudioProject(owner, 'Film français');
 		await db!.query('ALTER TABLE studio_jobs DROP CONSTRAINT studio_jobs_kind_check');
 		await db!.query("ALTER TABLE studio_jobs ADD CONSTRAINT studio_jobs_kind_check CHECK (kind IN ('probe','thumbnail','preview','export'))");
@@ -121,8 +123,15 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('Studio with PostgreSQL', () => 
 		expect(stored.input.source).toEqual({ space: clip.space, path: clip.path });
 		expect(stored.input.fingerprint).toBe(clip.fingerprint);
 		expect(stored.input.dubbing).toEqual({ url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: -2.5 });
+		const youtube = { url: 'https://youtu.be/abcdefghijk', aspect: 'source', start: 0.5, end: 2 };
+		for (const format of ['mp4', 'mkv', 'mp3']) {
+			const download = await studio.createStudioJob(owner, project.id, { kind: 'youtube', youtube, format });
+			expect(download).toMatchObject({ kind: 'youtube', status: 'queued', format, youtube: { ...youtube, url: 'https://www.youtube.com/watch?v=abcdefghijk' } });
+			await expect(studio.ownedStudioJob(other, project.id, download.id)).rejects.toMatchObject({ status: 404 });
+		}
 		await db!.query(migration);
 		expect((await studio.ownedStudioJob(owner, project.id, job.id)).kind).toBe('dub');
+		expect((await studio.studioJobs(owner, project.id)).filter((job) => job.kind === 'youtube')).toHaveLength(3);
 	});
 
 	it('rejects overlong edits and replaced sources without queueing an export', async () => {

@@ -4,7 +4,7 @@
   import { beforeNavigate, goto } from '$app/navigation';
   import { api, bytes, duration } from '#lib/client.js';
   import { language, t } from '#lib/i18n.js';
-  import { STUDIO_MAX_SECONDS, parseStudioSrt, studioDuration, type StudioClip, type StudioEdit, type StudioJob, type StudioJobKind, type StudioMedia, type StudioProject, type StudioSource } from '#lib/studio.js';
+  import { STUDIO_MAX_SECONDS, parseStudioSrt, studioDuration, type StudioClip, type StudioEdit, type StudioFormat, type StudioJob, type StudioJobKind, type StudioMedia, type StudioProject, type StudioSource, type StudioYoutube } from '#lib/studio.js';
   import Notification from '#lib/Notification.svelte';
   import Modal from '#lib/Modal.svelte';
   import Icon from '#lib/Icon.svelte';
@@ -18,6 +18,9 @@
   let browserOpen = $state(false), entries = $state<Entry[]>([]), filesLoading = $state(false), filesTotal = $state(0);
   let space = $state<'downloads' | 'share'>('downloads'), folder = $state(''), offset = $state(0), search = $state('');
   let selectedJob = $state(''), thumbnailJob = $state(''), thumbnailTime = $state(0);
+  let exportFormat = $state<StudioFormat>('mp4'), youtubeFormat = $state<StudioFormat>('mp4');
+  let youtubeUrl = $state(''), youtubeScope = $state<'whole' | 'clip'>('whole'), youtubeAspect = $state<StudioYoutube['aspect']>('source');
+  let youtubeStart = $state(0), youtubeEnd = $state(30);
   let dubbingUrl = $state(''), dubbingOffset = $state(0);
   let dubbingAudioId = $state(''), dubbingPlayer = $state<StudioDubbingPlayer>();
   let confirmOpen = $state(false);
@@ -30,7 +33,7 @@
   const dirty = $derived(project ? JSON.stringify(edit(project)) !== baseline : false);
   const activeJobs = $derived(jobs.some((job) => job.status === 'queued' || job.status === 'running'));
   const importing = $derived(jobs.some((job) => job.kind === 'probe' && (job.status === 'queued' || job.status === 'running')));
-  const currentRender = $derived(jobs.find((job) => (selectedJob ? job.id === selectedJob : job.kind === 'preview' || job.kind === 'export') && job.status === 'completed'));
+  const currentRender = $derived(jobs.find((job) => (selectedJob ? job.id === selectedJob : job.kind === 'preview' || job.kind === 'export' || job.kind === 'youtube') && job.status === 'completed'));
   const thumbnail = $derived(jobs.find((job) => job.id === thumbnailJob && job.status === 'completed'));
   const dubbingAudio = $derived(jobs.find((job) => job.id === dubbingAudioId && job.kind === 'dub-audio' && job.dubbing?.url === dubbingUrl.trim()));
   const preparedAudio = $derived(dubbingAudio?.status === 'completed' ? dubbingAudio : undefined);
@@ -138,19 +141,26 @@
     if ((kind === 'preview' || kind === 'export') && !(await save())) return;
     busy = true; error = ''; notice = '';
     try {
+      if (kind === 'youtube' && (!youtubeUrl.trim() || (youtubeScope === 'clip' && (!Number.isFinite(youtubeStart) || !Number.isFinite(youtubeEnd) || youtubeStart < 0 || youtubeEnd <= youtubeStart || youtubeEnd > 86400 || youtubeEnd - youtubeStart > STUDIO_MAX_SECONDS)))) throw new Error($t.studio.youtubeInvalid);
       if ((kind === 'dub' || kind === 'dub-audio') && (!dubbingUrl.trim() || (kind === 'dub' && (!source || !preparedAudio || !Number.isFinite(dubbingOffset) || Math.abs(dubbingOffset) > 600)))) throw new Error($t.studio.dubInvalid);
-      const { job } = await api<{ job: StudioJob }>(`/api/studio/${id}/jobs`, { method: 'POST', body: JSON.stringify({ kind, ...(source ? { source } : {}), ...(time !== undefined ? { time } : {}), ...(kind === 'dub' || kind === 'dub-audio' ? { dubbing: { url: dubbingUrl.trim(), offset: kind === 'dub' ? dubbingOffset : 0, ...(kind === 'dub' ? { audioJobId: preparedAudio!.id } : {}) } } : {}) }) });
+      const { job } = await api<{ job: StudioJob }>(`/api/studio/${id}/jobs`, { method: 'POST', body: JSON.stringify({ kind, ...(source ? { source } : {}), ...(time !== undefined ? { time } : {}), ...(kind === 'export' ? { format: exportFormat } : {}), ...(kind === 'youtube' ? { format: youtubeFormat, youtube: { url: youtubeUrl.trim(), aspect: youtubeFormat === 'mp3' ? 'source' : youtubeAspect, ...(youtubeScope === 'clip' ? { start: youtubeStart, end: youtubeEnd } : {}) } } : {}), ...(kind === 'dub' || kind === 'dub-audio' ? { dubbing: { url: dubbingUrl.trim(), offset: kind === 'dub' ? dubbingOffset : 0, ...(kind === 'dub' ? { audioJobId: preparedAudio!.id } : {}) } } : {}) }) });
       jobs = [job, ...jobs];
       if (kind === 'dub-audio') useDubbingAudio(job);
       if (kind === 'probe') { pendingProbes.add(job.id); browserOpen = false; }
       if (kind === 'thumbnail') thumbnailJob = job.id;
-      if (kind === 'preview' || kind === 'export') selectedJob = job.id;
+      if (kind === 'preview' || kind === 'export' || kind === 'youtube') selectedJob = job.id;
     } catch (e) { error = (e as Error).message; }
     finally { busy = false; }
   }
   function useDubbingAudio(job: StudioJob) {
     if (!job.dubbing) return;
     dubbingAudioId = job.id; dubbingUrl = job.dubbing.url; dubbingOffset = 0;
+  }
+  function useYoutubeJob(job: StudioJob) {
+    if (!job.youtube) return;
+    youtubeUrl = job.youtube.url; youtubeFormat = job.format ?? 'mp4'; youtubeAspect = job.youtube.aspect;
+    youtubeScope = job.youtube.start === undefined ? 'whole' : 'clip';
+    youtubeStart = job.youtube.start ?? 0; youtubeEnd = job.youtube.end ?? 30;
   }
   async function loadFiles(nextFolder = folder, nextOffset = offset) {
     folder = nextFolder; offset = nextOffset; filesLoading = true; const request = ++fileRequest;
@@ -177,7 +187,7 @@
     finally { busy = false; }
   }
   function ask(kind: 'project' | 'job' | 'publish', job: StudioJob | null = null) {
-    confirmation = kind; confirmOpen = true; targetJob = job; sharedName = `${(project?.name ?? 'clip').replace(/[\\/]/g, '-')}${job?.kind === 'dub' ? '-fr.mkv' : '.mp4'}`;
+    confirmation = kind; confirmOpen = true; targetJob = job; sharedName = `${(project?.name ?? 'clip').replace(/[\\/]/g, '-')}${job?.kind === 'dub' ? '-fr.mkv' : `.${job?.format ?? 'mp4'}`}`;
   }
   async function confirm() {
     if (confirmation === 'leave') { allowNavigation = true; confirmation = null; confirmOpen = false; await goto(leaveHref); return; }
@@ -226,6 +236,25 @@
     </div>
     {#if dirty}<p class="unsaved">{$t.studio.unsaved}</p>{/if}
   </section>
+  <details class="panel render-panel" open={!project.clips.length}>
+    <summary>{$t.studio.youtube}</summary>
+    <p class="help">{$t.studio.youtubeHelp}</p>
+    <form onsubmit={(event) => { event.preventDefault(); void createJob('youtube'); }}>
+      <fieldset disabled={busy}>
+        <label>{$t.studio.youtubeUrl}<input type="url" required maxlength="2048" bind:value={youtubeUrl} placeholder="https://www.youtube.com/watch?v=…" /></label>
+        <div class="youtube-options">
+          <label>{$t.studio.youtubeScope}<select bind:value={youtubeScope}><option value="whole">{$t.studio.youtubeWhole}</option><option value="clip">{$t.studio.clip}</option></select></label>
+          <label>{$t.studio.outputFormat}<select bind:value={youtubeFormat}><option value="mp4">MP4</option><option value="mkv">MKV</option><option value="mp3">{$t.studio.mp3}</option></select></label>
+          {#if youtubeFormat !== 'mp3'}<label>{$t.studio.youtubeAspect}<select bind:value={youtubeAspect}><option value="source">{$t.studio.originalAspect}</option><option value="16:9">{$t.studio.landscape}</option><option value="9:16">{$t.studio.portrait}</option></select></label>{/if}
+        </div>
+        {#if youtubeScope === 'clip'}
+          <div class="youtube-options"><label>{$t.studio.start}<input type="number" required min="0" max="86400" step="0.001" bind:value={youtubeStart} /></label><label>{$t.studio.end}<input type="number" required min="0" max="86400" step="0.001" bind:value={youtubeEnd} /></label></div>
+          <p class="help">{$t.studio.youtubeClipHelp}</p>
+        {/if}
+        <div><button class="primary">{$t.studio.youtubeCreate}</button></div>
+      </fieldset>
+    </form>
+  </details>
   <section class="panel timeline-panel" aria-label={$t.studio.timeline}>
     <div class="toolbar"><h2 class="step-heading"><span>1</span>{$t.studio.addStep}</h2><span class="spacer"></span><button class="secondary" disabled={busy || total >= STUDIO_MAX_SECONDS || project.clips.length >= 32} onclick={openLibrary}>{$t.studio.library}</button></div>
     <p class="section-help help">{$t.studio.addHelp}</p>
@@ -317,26 +346,30 @@
   </details>
   <section class="panel render-panel">
     <h2 class="step-heading"><span>3</span>{$t.studio.exportStep}</h2>
-    <div class="render-actions"><button class="secondary" disabled={busy || !project.clips.length || total > STUDIO_MAX_SECONDS || !!srtError} onclick={() => createJob('preview')}>{$t.studio.renderPreview}</button><button class="primary" disabled={busy || !project.clips.length || total > STUDIO_MAX_SECONDS || !!srtError} onclick={() => createJob('export')}>{$t.studio.renderExport}</button></div>
+    <div class="render-actions"><label>{$t.studio.outputFormat}<select bind:value={exportFormat} disabled={busy}><option value="mp4">MP4</option><option value="mkv">MKV</option><option value="mp3">{$t.studio.mp3}</option></select></label><button class="secondary" disabled={busy || !project.clips.length || total > STUDIO_MAX_SECONDS || !!srtError} onclick={() => createJob('preview')}>{$t.studio.renderPreview}</button><button class="primary" disabled={busy || !project.clips.length || total > STUDIO_MAX_SECONDS || !!srtError} onclick={() => createJob('export')}>{$t.studio.renderExport}</button></div>
     <p class="help">{$t.studio.renderHelp}</p>
     {#if currentRender}
-      <video class="render-video" controls playsinline preload="metadata" src={jobUrl(currentRender, true)}><track kind="captions" />{$t.browserUnsupported}</video>
-      <div class="render-actions"><a class="button primary" href={jobUrl(currentRender)}><Icon name="download" />{$t.download}</a>{#if currentRender.kind === 'export'}<button class="secondary" disabled={busy} onclick={() => ask('publish', currentRender)}>{$t.studio.publish}</button>{/if}</div>
+      {#if currentRender.format === 'mp3'}<audio class="render-audio" controls preload="metadata" src={jobUrl(currentRender, true)}></audio>
+      {:else if currentRender.format === 'mkv'}<p class="help">{$t.studio.mkvHelp}</p>
+      {:else}<video class="render-video" controls playsinline preload="metadata" src={jobUrl(currentRender, true)}><track kind="captions" />{$t.browserUnsupported}</video>{/if}
+      <div class="render-actions"><a class="button primary" href={jobUrl(currentRender)}><Icon name="download" />{$t.download}</a>{#if currentRender.kind === 'export' || currentRender.kind === 'youtube'}<button class="secondary" disabled={busy} onclick={() => ask('publish', currentRender)}>{$t.studio.publish}</button>{/if}</div>
     {/if}
     <details class="job-history" open={activeJobs || jobs.some((job) => job.status === 'failed' || (job.kind === 'dub' && job.status === 'completed'))}>
     <summary>{$t.studio.jobs}</summary>
     {#if !jobs.length}<p class="help">{$t.studio.noJobs}</p>{/if}
-    <ul class="job-list">{#each jobs as job (job.id)}<li><div class="job-summary"><strong>{$t.studio[job.kind]}</strong><span class={['badge', { bad: job.status === 'failed' }]}>{$t.studio[job.status]}</span><time datetime={job.createdAt}>{new Date(job.createdAt).toLocaleString($language)}</time></div>
+    <ul class="job-list">{#each jobs as job (job.id)}<li><div class="job-summary"><strong>{$t.studio[job.kind]}</strong>{#if job.format}<span class="badge">{job.format.toUpperCase()}</span>{/if}<span class={['badge', { bad: job.status === 'failed' }]}>{$t.studio[job.status]}</span><time datetime={job.createdAt}>{new Date(job.createdAt).toLocaleString($language)}</time></div>
+      {#if job.youtube}<p class="help">{job.youtube.url} · {job.youtube.start === undefined ? $t.studio.youtubeWhole : `${job.youtube.start} → ${job.youtube.end} s`}</p>{/if}
       {#if job.status === 'running'}<progress max="100" value={job.progress} aria-label={$t.studio[job.kind]}></progress>{/if}
       {#if job.error}<p class="validation">{job.error}</p>{/if}
       <div class="job-actions">
         {#if job.status === 'queued' || job.status === 'running'}<button class="quiet-button" disabled={busy} onclick={() => cancelJob(job)}>{$t.cancel}</button>
         {:else if job.status === 'completed'}
           {#if job.kind === 'probe' && job.result}<button class="quiet-button" disabled={busy || total >= STUDIO_MAX_SECONDS || project.clips.length >= 32} onclick={() => job.result && addMedia(job.result)}>{$t.studio.createClip}</button>
-          {:else if job.kind === 'preview' || job.kind === 'export'}<button class="quiet-button" onclick={() => { selectedJob = job.id; }}>{$t.studio.watch}</button><a class="button secondary" href={jobUrl(job)}>{$t.download}</a>{#if job.kind === 'export'}<button class="quiet-button" disabled={busy} onclick={() => ask('publish', job)}>{$t.studio.publish}</button>{/if}
+          {:else if job.kind === 'preview' || job.kind === 'export' || job.kind === 'youtube'}<button class="quiet-button" onclick={() => { selectedJob = job.id; }}>{$t.studio.watch}</button><a class="button secondary" href={jobUrl(job)}>{$t.download}</a>{#if job.kind === 'export' || job.kind === 'youtube'}<button class="quiet-button" disabled={busy} onclick={() => ask('publish', job)}>{$t.studio.publish}</button>{/if}
           {:else if job.kind === 'dub'}<a class="button secondary" href={jobUrl(job)}>{$t.studio.dubDownload}</a><button class="quiet-button" disabled={busy} onclick={() => ask('publish', job)}>{$t.studio.publish}</button>
           {:else if job.kind === 'dub-audio'}<button class="quiet-button" disabled={busy} onclick={() => useDubbingAudio(job)}>{$t.studio.dubUseAudio}</button>
           {:else if job.kind === 'thumbnail'}<button class="quiet-button" onclick={() => { thumbnailJob = job.id; }}>{$t.studio.thumbnail}</button>{/if}
+        {:else if job.kind === 'youtube'}<button class="quiet-button" disabled={busy} onclick={() => { useYoutubeJob(job); void createJob('youtube'); }}>{$t.studio.retry}</button>
         {:else if job.kind === 'preview' || job.kind === 'export'}<button class="quiet-button" disabled={busy || !project.clips.length} onclick={() => createJob(job.kind)}>{$t.studio.retry}</button>{/if}
         {#if job.status !== 'queued' && job.status !== 'running'}<button class="icon-button danger" aria-label={$t.deleteShort} disabled={busy} onclick={() => ask('job', job)}><Icon name="trash" /></button>{/if}
       </div></li>{/each}</ul>
@@ -365,6 +398,8 @@
 </Modal>
 
 <style>
+  .youtube-options{display:flex;gap:16px;flex-wrap:wrap}.youtube-options label{flex:1;min-width:150px}.render-audio{display:block;width:100%;margin:12px 0 24px}
+  @media(max-width:700px){.youtube-options label{flex-basis:100%}}
   h2,h3{font-size:17px;margin:0 0 12px;overflow-wrap:anywhere}.studio-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}.project-panel,.timeline-panel,.editor-panel,.subtitle-panel,.render-panel{margin-bottom:20px}.project-name{flex:1;min-width:160px}.toolbar{align-items:end}.toolbar h2{margin:0;align-self:center}.unsaved{color:var(--warning);margin:12px 20px}.editor-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;margin-top:20px}.source-view,.clip-settings{min-width:0}.help{color:var(--muted);font-size:13px;line-height:1.6}.crop-preview{background:#000;border-radius:var(--shape-md);position:relative;overflow:hidden;width:100%;max-width:782px;margin-inline:auto}.crop-preview.portrait{max-width:247px}.crop-preview video{width:100%;height:100%;object-fit:cover;display:block}.preview-title,.preview-subtitle{position:absolute;left:8%;right:8%;text-align:center;color:#fff;text-shadow:0 1px 4px #000,1px 0 #000,-1px 0 #000;white-space:pre-line;overflow-wrap:anywhere;pointer-events:none}.preview-title{top:8%;font-weight:700;font-size:clamp(14px,2vw,28px)}.preview-subtitle{bottom:18%;font-size:clamp(12px,1.5vw,22px)}fieldset{border:0;padding:0;margin:0;display:grid;gap:16px;min-width:0}.clip-buttons,.thumbnail-tools,.render-actions,.job-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.thumbnail-tools{align-items:end;margin:16px 0}.thumbnail-tools input{width:130px}.thumbnail{max-width:100%;max-height:200px;border-radius:var(--shape-sm)}.timeline{display:flex;gap:12px;list-style:none;margin:0;padding:16px;overflow-x:auto}.timeline li{flex:0 0 210px;border:1px solid var(--line);border-radius:var(--shape-md);background:var(--surface-container)}.timeline li.chosen{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.clip-select{display:grid;gap:6px;text-align:left;width:100%;padding:14px;background:transparent;color:var(--text)}.clip-select span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.clip-select small{color:var(--muted)}.clip-actions{display:flex;justify-content:space-around;border-top:1px solid var(--line)}.editor-panel,.subtitle-panel,.render-panel{padding:20px}.subtitle-panel label+label{margin-top:16px}textarea{resize:vertical;width:100%;font-family:ui-monospace,monospace;font-size:14px}.validation{color:var(--danger);overflow-wrap:anywhere}.render-video{width:100%;max-height:500px;background:#000;border-radius:var(--shape-md);margin:12px 0 24px}.job-list{list-style:none;margin:0;padding:0}.job-list li{padding:16px 0;border-top:1px solid var(--line)}.job-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.job-summary time{margin-left:auto;color:var(--muted);font-size:12px}.job-actions{margin-top:12px}progress{width:100%;height:8px;margin-top:12px;accent-color:var(--accent)}.library-toolbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap}.library-toolbar label:nth-child(2){flex:1;min-width:140px}.folder-path{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px;overflow-wrap:anywhere}.library-list{list-style:none;padding:0;max-height:45vh;overflow-y:auto}.library-entry{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 8px;background:transparent;color:var(--text);border-bottom:1px solid var(--line)}.library-entry:hover{background:var(--panel-hover)}.library-entry span{flex:1;min-width:0;overflow-wrap:anywhere}.library-entry small{color:var(--muted);white-space:nowrap}
   .step-heading{display:flex;align-items:center;gap:10px}.step-heading span{display:grid;place-items:center;flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--secondary-container);color:var(--on-secondary-container);font-size:14px}.section-help{padding-inline:16px}.source-navigation{margin-top:16px}.source-navigation label{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.source-navigation output{font-variant-numeric:tabular-nums;color:var(--muted)}.source-navigation input{width:100%;accent-color:var(--accent)}summary{cursor:pointer;min-height:44px;align-content:center;font-weight:600}.advanced-settings label{margin-top:16px}.clip-settings .help{margin:0}.job-history{margin-top:20px}
   @media(max-width:1000px){.editor-grid{grid-template-columns:minmax(0,1fr) 250px;gap:16px}}

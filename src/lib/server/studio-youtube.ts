@@ -3,6 +3,7 @@ import { connect, type Socket } from 'node:net';
 import { publicDestination } from './network.js';
 
 export const STUDIO_AUDIO_MAX_BYTES = 1024 * 1024 * 1024;
+export const STUDIO_YOUTUBE_MAX_BYTES = 10 * 1024 * 1024 * 1024;
 
 export async function youtubeDestination(authority: string, signal: AbortSignal) {
 	if (!/^(?:[a-z0-9-]+\.)*(?:youtube\.com|googlevideo\.com|ytimg\.com):443$/i.test(authority) && authority !== 'youtubei.googleapis.com:443') {
@@ -40,7 +41,7 @@ export async function withYoutubeProxy<T>(signal: AbortSignal, work: (proxy: str
 			remote.setTimeout(30_000, () => remote.destroy());
 			remote.on('data', (chunk: Buffer) => {
 				received += chunk.length;
-				if (received > maximum) controller.abort(new Error('Bande son YouTube trop volumineuse (1 Gio maximum).'));
+				if (received > maximum) controller.abort(new Error(`Transfert YouTube trop volumineux (${maximum >= 1024 ** 3 ? `${maximum / 1024 ** 3} Gio` : `${maximum} octets`} maximum).`));
 			});
 			remote.on('connect', () => {
 				client.write('HTTP/1.1 200 Connection Established\r\n\r\n');

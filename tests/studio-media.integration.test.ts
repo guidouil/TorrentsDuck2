@@ -8,7 +8,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { sourceFingerprint, studioJobDirectory, studioOutput } from '../src/lib/server/studio';
 import { runStudioJob, type WorkerJob } from '../src/lib/server/studio-worker';
-import type { StudioClip, StudioEdit, StudioJobKind, StudioSource } from '../src/lib/studio';
+import type { StudioClip, StudioEdit, StudioFormat, StudioJobKind, StudioSource } from '../src/lib/studio';
 
 const exec = promisify(execFile);
 const available = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0 && spawnSync('ffprobe', ['-version'], { stdio: 'ignore' }).status === 0;
@@ -22,6 +22,14 @@ describe.skipIf(!available)('Studio with native FFmpeg and synthetic media', () 
 	async function clip(file: string, start: number, end: number, audio: number | null): Promise<StudioClip> {
 		const source: StudioSource = { space: 'share', path: file };
 		return { ...source, ...(await sourceFingerprint(source)), start, end, audio, title: '', x: 0.5, y: 0.5 };
+	}
+	async function youtubeDownloader(videoFile: string, audioFile: string) {
+		const bin = path.join(root, 'youtube-bin');
+		await mkdir(bin, { recursive: true });
+		const downloader = path.join(bin, 'yt-dlp');
+		await writeFile(downloader, `#!${process.execPath}\nconst fs = require('node:fs'); const args=process.argv.slice(2); if(!args.includes('--proxy') || !args.includes('--no-remote-components') || !args.includes('--no-plugin-dirs') || args[args.indexOf('--downloader')+1]!=='native') process.exit(1); const video=args[args.indexOf('--format')+1].startsWith('bestvideo'); fs.copyFileSync(video ? ${JSON.stringify(videoFile)} : ${JSON.stringify(audioFile)},args[args.indexOf('--output')+1]);\n`);
+		await chmod(downloader, 0o755);
+		vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH}`);
 	}
 	beforeAll(async () => {
 		root = await mkdtemp(path.join(tmpdir(), 'duck-studio-media-'));
@@ -133,6 +141,74 @@ describe.skipIf(!available)('Studio with native FFmpeg and synthetic media', () 
 			expect(await readdir(path.dirname(output))).toEqual(['output.mkv']);
 		}
 		expect(await readFile(original)).toEqual(before);
+	}, 30_000);
+
+	it.each(['mkv', 'mp3'] as const)('exports a montage as %s with complete audio and matching streams', async (format) => {
+		const render = job('export', { ...empty, aspect: '16:9', clips: [await clip('red.mp4', 0.5, 1.5, 1), await clip('blue.mkv', 0, 1, null)] });
+		render.input.format = format;
+		await runStudioJob(render, { signal: signal() });
+		const output = await studioOutput(render.id, render.kind, format);
+		const metadata = JSON.parse((await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height,sample_rate,channels', '-of', 'json', output])).stdout);
+		expect(Number(metadata.format.duration)).toBeCloseTo(2, 1);
+		expect(metadata.streams.filter((stream: { codec_type: string }) => stream.codec_type === 'video')).toHaveLength(format === 'mp3' ? 0 : 1);
+		expect(metadata.streams).toContainEqual(expect.objectContaining({ codec_type: 'audio', codec_name: format === 'mp3' ? 'mp3' : 'aac', sample_rate: '48000', channels: 2 }));
+		expect(await readdir(path.dirname(output))).toEqual([`output.${format}`]);
+	}, 60_000);
+
+	it('downloads whole YouTube videos in MP4/MKV without changing source video packets or resolution', async () => {
+		const original = path.join(root, 'share/red.mp4');
+		const packets = async (file: string) => JSON.parse((await exec('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_packets', '-show_data_hash', 'sha256', '-show_entries', 'packet=data_hash', '-of', 'json', file])).stdout).packets.map((packet: { data_hash: string }) => packet.data_hash);
+		await youtubeDownloader(original, original);
+		for (const format of ['mp4', 'mkv'] as const) {
+			const download = job('youtube');
+			download.input = { project: empty, format, youtube: { url: 'https://youtu.be/abcdefghijk', aspect: 'source' } };
+			await runStudioJob(download, { signal: signal() });
+			const output = await studioOutput(download.id, download.kind, format);
+			const metadata = JSON.parse((await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height', '-of', 'json', output])).stdout);
+			expect(Number(metadata.format.duration)).toBeCloseTo(3, 1);
+			expect(metadata.streams).toContainEqual(expect.objectContaining({ codec_type: 'video', width: 320, height: 180 }));
+			expect(await packets(output)).toEqual(await packets(original));
+			expect(await readdir(path.dirname(output))).toEqual([`output.${format}`]);
+		}
+		await youtubeDownloader(path.join(root, 'share/blue.mkv'), original);
+		const mkv = job('youtube');
+		mkv.input = { project: empty, format: 'mkv', youtube: { url: 'https://youtu.be/abcdefghijk', aspect: 'source' } };
+		await runStudioJob(mkv, { signal: signal() });
+		expect(await packets(await studioOutput(mkv.id, 'youtube', 'mkv'))).toEqual(await packets(path.join(root, 'share/blue.mkv')));
+	}, 30_000);
+
+	it.each([
+		{ format: 'mp4', aspect: '9:16', start: 0.5, end: 1.5, width: 1080, height: 1920 },
+		{ format: 'mp3', aspect: 'source', start: 0.5, end: 1.5 },
+		{ format: 'mp3', aspect: 'source' }
+	] as const)('downloads a private YouTube clip or full audio (%j)', async (settings) => {
+		const original = path.join(root, 'share/red.mp4');
+		await youtubeDownloader(original, original);
+		const download = job('youtube');
+		download.input = { project: empty, format: settings.format, youtube: { url: 'https://youtu.be/abcdefghijk', ...settings } };
+		await runStudioJob(download, { signal: signal() });
+		const output = await studioOutput(download.id, 'youtube', settings.format);
+		const metadata = JSON.parse((await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height,sample_rate,channels', '-of', 'json', output])).stdout);
+		expect(Number(metadata.format.duration)).toBeCloseTo(settings.end !== undefined ? settings.end - settings.start! : 3, 1);
+		expect(metadata.streams.filter((stream: { codec_type: string }) => stream.codec_type === 'video')).toHaveLength(settings.format === 'mp3' ? 0 : 1);
+		if ('width' in settings) expect(metadata.streams).toContainEqual(expect.objectContaining({ width: settings.width, height: settings.height }));
+		expect(metadata.streams).toContainEqual(expect.objectContaining({ codec_type: 'audio', codec_name: settings.format === 'mp3' ? 'mp3' : 'aac', sample_rate: '48000', channels: 2 }));
+		expect(await readdir(path.dirname(output))).toEqual([`output.${settings.format}`]);
+	}, 30_000);
+
+	it('rejects YouTube audio without an audio stream and clips beyond the downloaded media duration', async () => {
+		const original = path.join(root, 'share/red.mp4');
+		await youtubeDownloader(original, path.join(root, 'share/blue.mkv'));
+		const download = job('youtube');
+		download.input = { project: empty, format: 'mp3', youtube: { url: 'https://youtu.be/abcdefghijk', aspect: 'source' } };
+		await expect(runStudioJob(download, { signal: signal() })).rejects.toThrow('audio invalide');
+		await youtubeDownloader(original, original);
+		for (const format of ['mp4', 'mp3'] satisfies StudioFormat[]) {
+			const invalid = job('youtube');
+			invalid.input = { project: empty, format, youtube: { url: 'https://youtu.be/abcdefghijk', aspect: 'source', start: 2, end: 4 } };
+			await expect(runStudioJob(invalid, { signal: signal() })).rejects.toThrow('au-delà');
+			await expect(readFile(await studioOutput(invalid.id, 'youtube', format))).rejects.toMatchObject({ code: 'ENOENT' });
+		}
 	}, 30_000);
 
 	it('produces only a short low resolution preview and refuses changed sources', async () => {

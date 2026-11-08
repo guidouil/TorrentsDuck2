@@ -9,7 +9,7 @@ import { parseStudioSrt, type StudioClip } from '../src/lib/studio';
 const mocked = vi.hoisted(() => ({ query: vi.fn(), clientQuery: vi.fn(), storage: vi.fn() }));
 vi.mock('../src/lib/server/db', () => ({ query: mocked.query, transaction: (run: (client: unknown) => unknown) => run({ query: mocked.clientQuery }) }));
 vi.mock('../src/lib/server/storage', () => ({ requireStorage: mocked.storage }));
-import { createStudioJob, deleteStudioJob, ownedStudioJob, ownedStudioProject, publishStudioJob, sourceFingerprint, studioFile, studioJobDirectory, studioOutput, validateStudioDubbing, validateStudioEdit } from '../src/lib/server/studio';
+import { createStudioJob, deleteStudioJob, ownedStudioJob, ownedStudioProject, publishStudioJob, sourceFingerprint, studioFile, studioJobDirectory, studioOutput, validateStudioDubbing, validateStudioEdit, validateStudioFormat, validateStudioYoutube } from '../src/lib/server/studio';
 
 const id = '791b3f30-6e8b-44cb-960e-f8b723160833';
 const jobId = '791b3f30-6e8b-44cb-960e-f8b723160834';
@@ -74,6 +74,26 @@ describe('Studio YouTube dubbing validation', () => {
 		{ url: 'https://youtu.be/abcdefghijk', offset: 0, audioJobId: '../private' }
 	])('rejects unsafe links and invalid offsets (%j)', (input) => {
 		expect(() => validateStudioDubbing(input)).toThrow();
+	});
+});
+
+describe('Studio YouTube download validation', () => {
+	const youtube = { url: 'https://youtu.be/abcdefghijk?list=ignored', aspect: 'source' };
+	it('accepts full videos and clips up to five minutes, with normalized links', () => {
+		expect(validateStudioYoutube(youtube)).toEqual({ url: 'https://www.youtube.com/watch?v=abcdefghijk', aspect: 'source' });
+		expect(validateStudioYoutube({ ...youtube, aspect: '9:16', start: 45.5, end: 345.5 })).toMatchObject({ aspect: '9:16', start: 45.5, end: 345.5 });
+	});
+	it.each([
+		{ start: 0 }, { end: 2 }, { start: '0', end: 2 }, { start: NaN, end: 2 }, { start: 0, end: Infinity },
+		{ start: -1, end: 2 }, { start: 2, end: 2 }, { start: 0, end: 301 }, { start: 86399, end: 86401 },
+		{ aspect: '1:1' }, { url: 'https://127.0.0.1/watch?v=abcdefghijk' }, { url: 'https://www.youtube.com/playlist?list=abcdefghijk' }
+	])('rejects invalid links, ranges and crop settings (%j)', (changes) => {
+		expect(() => validateStudioYoutube({ ...youtube, ...changes })).toThrow();
+	});
+	it('limits formats to MP4, MKV and MP3 and preserves the legacy MP4 default', () => {
+		for (const format of ['mp4', 'mkv', 'mp3']) expect(validateStudioFormat(format)).toBe(format);
+		expect(validateStudioFormat(undefined)).toBe('mp4');
+		for (const format of ['webm', '../mkv', null, {}, 3]) expect(() => validateStudioFormat(format)).toThrow();
 	});
 });
 
@@ -150,6 +170,26 @@ describe('private Studio files and sources', () => {
 		expect(nginx.headers.get('x-accel-redirect')).toBe(`/_protected/studio/${jobId}/output.m4a`);
 		await expect(publishStudioJob('owner', id, jobId, { name: 'audio.m4a', confirm: true })).rejects.toMatchObject({ status: 400 });
 	});
+	it.each(['youtube', 'export'] as const)('serves and publishes %s formats with their matching extension', async (kind) => {
+		for (const format of ['mkv', 'mp3'] as const) {
+			mocked.query.mockImplementation(async (sql: string) => sql.includes('SELECT') ? [{ ...completed, kind, format }] : []);
+			await writeFile(await studioOutput(jobId, kind, format), '0123456789');
+			const url = new URL('http://localhost/api/studio/file');
+			const response = await studioFile({ url, request: new Request(url, { headers: { range: 'bytes=2-4' } }) } as RequestEvent, 'owner', id, jobId);
+			expect(response.status).toBe(206);
+			expect(response.headers.get('content-type')).toBe(format === 'mp3' ? 'audio/mpeg' : 'video/x-matroska');
+			expect(await response.text()).toBe('234');
+			vi.stubEnv('FILE_DELIVERY', 'nginx');
+			const head = await studioFile({ url, request: new Request(url, { method: 'HEAD' }) } as RequestEvent, 'owner', id, jobId);
+			expect(head.headers.get('x-accel-redirect')).toBe(`/_protected/studio/${jobId}/output.${format}`);
+			vi.stubEnv('FILE_DELIVERY', 'node');
+			await expect(publishStudioJob('owner', id, jobId, { name: 'Wrong.mp4', confirm: true })).rejects.toMatchObject({ status: 400 });
+			const name = `${kind}.${format}`;
+			expect(await publishStudioJob('owner', id, jobId, { name, confirm: true })).toEqual({ path: name });
+			expect(await readFile(path.join(root, 'share', name), 'utf8')).toBe('0123456789');
+			await expect(publishStudioJob('owner', id, jobId, { name, confirm: true })).rejects.toMatchObject({ status: 409 });
+		}
+	});
 	it('requires explicit collective publication and completed-output deletion confirmation', async () => {
 		await expect(publishStudioJob('owner', id, jobId, { name: 'x.mp4' })).rejects.toMatchObject({ status: 400 });
 		mocked.query.mockResolvedValue([completed]);
@@ -195,6 +235,26 @@ describe('private Studio files and sources', () => {
 		const insert = mocked.clientQuery.mock.calls.find(([sql]) => sql.startsWith('INSERT'))!;
 		expect(insert[1][3]).toBe('dub-audio');
 		expect(JSON.parse(insert[1][4])).toEqual({ project: { ...edit(), clips: [] }, dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: 0 } });
+	});
+	it.each(['mp4', 'mkv', 'mp3'])('queues private YouTube %s downloads without a local source or montage', async (format) => {
+		mocked.query.mockResolvedValue([{ id, edit: { ...edit(), clips: [] }, createdAt: new Date(), updatedAt: new Date() }]);
+		mocked.clientQuery.mockImplementation(async (sql: string) => ({ rows: sql.includes('count(*)') ? [{ active: 0, total: 0 }] : sql.startsWith('INSERT') ? [{ id: jobId, kind: 'youtube', status: 'queued' }] : [] }));
+		await createStudioJob('owner', id, { kind: 'youtube', youtube: { url: 'https://youtu.be/abcdefghijk', aspect: 'source', start: 1, end: 20 }, format });
+		const insert = mocked.clientQuery.mock.calls.find(([sql]) => sql.startsWith('INSERT'))!;
+		expect(JSON.parse(insert[1][4])).toEqual({ project: { ...edit(), clips: [] }, youtube: { url: 'https://www.youtube.com/watch?v=abcdefghijk', aspect: 'source', start: 1, end: 20 }, format });
+		expect(await readdir(path.join(root, 'share'))).toEqual([]);
+	});
+	it('rejects unsupported formats and invalid YouTube ranges before preparing a private directory or queueing work', async () => {
+		mocked.query.mockResolvedValue([{ id, edit: { ...edit(), clips: [] }, createdAt: new Date(), updatedAt: new Date() }]);
+		const youtube = { url: 'https://youtu.be/abcdefghijk', aspect: 'source' };
+		for (const input of [
+			{ kind: 'youtube', youtube, format: '../mp4' },
+			{ kind: 'youtube', youtube: { ...youtube, start: 0, end: 301 } },
+			{ kind: 'youtube', youtube: { ...youtube, url: 'https://private.test/video' } },
+			{ kind: 'export', format: 'exe' }
+		]) await expect(createStudioJob('owner', id, input)).rejects.toMatchObject({ status: 400 });
+		expect(mocked.clientQuery).not.toHaveBeenCalled();
+		expect(await readdir(path.join(root, 'studio'))).toEqual([]);
 	});
 	it('snapshots owned prepared audio so deleting it cannot break an already queued export', async () => {
 		const prepared = { ...completed, kind: 'dub-audio', dubbing: { url: 'https://www.youtube.com/watch?v=abcdefghijk', offset: 0 } };

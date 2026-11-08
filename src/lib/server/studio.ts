@@ -5,7 +5,7 @@ import path from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { error, type RequestEvent } from '@sveltejs/kit';
-import { parseStudioSrt, STUDIO_MAX_SECONDS, studioDuration, type StudioClip, type StudioDubbing, type StudioEdit, type StudioJob, type StudioJobInput, type StudioJobKind, type StudioProject, type StudioSource } from '../studio';
+import { parseStudioSrt, STUDIO_MAX_SECONDS, studioDuration, type StudioClip, type StudioDubbing, type StudioEdit, type StudioFormat, type StudioJob, type StudioJobInput, type StudioJobKind, type StudioProject, type StudioSource, type StudioYoutube } from '../studio';
 import { query, transaction } from './db';
 import { fileName, fileResponse, fileSpace, relativePath, resolveFile } from './files';
 import { requireStorage } from './storage';
@@ -15,7 +15,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const videos = /\.(mp4|m4v|webm|ogv|mkv|mov|avi|mpeg|mpg|wmv|flv|m2ts|mts|vob|3gp)$/i;
 type ProjectRow = { id: string; edit: StudioEdit; createdAt: Date; updatedAt: Date };
 const projectFields = 'id,edit,created_at AS "createdAt",updated_at AS "updatedAt"';
-const jobFields = 'id,project_id AS "projectId",kind,status,progress,error,result,input->\'dubbing\' AS dubbing,created_at AS "createdAt",updated_at AS "updatedAt"';
+const jobFields = 'id,project_id AS "projectId",kind,status,progress,error,result,input->\'dubbing\' AS dubbing,input->>\'format\' AS format,input->\'youtube\' AS youtube,created_at AS "createdAt",updated_at AS "updatedAt"';
 
 export function studioId(value: unknown): string {
 	if (typeof value !== 'string' || !uuid.test(value)) error(404, 'Projet ou tâche introuvable.');
@@ -30,20 +30,40 @@ function sourceInput(value: unknown): StudioSource {
 	return { space, path: sourcePath };
 }
 
-export function validateStudioDubbing(value: unknown): StudioDubbing {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) error(400, 'Lien YouTube et décalage audio requis.');
-	const input = value as Record<string, unknown>;
-	if (typeof input.url !== 'string' || input.url.length > 2048) error(400, 'Lien YouTube invalide.');
+function youtubeUrl(value: unknown): string {
+	if (typeof value !== 'string' || value.length > 2048) error(400, 'Lien YouTube invalide.');
 	let url: URL;
-	try { url = new URL(input.url); } catch { error(400, 'Lien YouTube invalide.'); }
+	try { url = new URL(value); } catch { error(400, 'Lien YouTube invalide.'); }
 	if (url.protocol !== 'https:' || url.username || url.password || url.port ||
 		!['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'].includes(url.hostname)) error(400, 'Lien HTTPS YouTube requis.');
 	const video = url.hostname === 'youtu.be' ? url.pathname.slice(1) :
 		url.pathname === '/watch' ? url.searchParams.get('v') : /^\/(?:shorts|live|embed)\/([^/]+)$/.exec(url.pathname)?.[1];
 	if (!video || !/^[a-zA-Z0-9_-]{11}$/.test(video)) error(400, 'Lien vers une seule vidéo YouTube requis.');
+	return `https://www.youtube.com/watch?v=${video}`;
+}
+
+export function validateStudioDubbing(value: unknown): StudioDubbing {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) error(400, 'Lien YouTube et décalage audio requis.');
+	const input = value as Record<string, unknown>, url = youtubeUrl(input.url);
 	if (typeof input.offset !== 'number' || !Number.isFinite(input.offset) || Math.abs(input.offset) > 600) error(400, 'Décalage audio requis entre −600 et 600 secondes.');
 	if (input.audioJobId !== undefined) studioId(input.audioJobId);
-	return { url: `https://www.youtube.com/watch?v=${video}`, offset: input.offset, ...(input.audioJobId !== undefined ? { audioJobId: input.audioJobId as string } : {}) };
+	return { url, offset: input.offset, ...(input.audioJobId !== undefined ? { audioJobId: input.audioJobId as string } : {}) };
+}
+
+export function validateStudioYoutube(value: unknown): StudioYoutube {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) error(400, 'Vidéo YouTube requise.');
+	const input = value as Record<string, unknown>, url = youtubeUrl(input.url);
+	if (input.aspect !== 'source' && input.aspect !== '16:9' && input.aspect !== '9:16') error(400, 'Cadrage YouTube invalide.');
+	if (input.start === undefined && input.end === undefined) return { url, aspect: input.aspect };
+	if (typeof input.start !== 'number' || typeof input.end !== 'number' || !Number.isFinite(input.start) || !Number.isFinite(input.end) ||
+		input.start < 0 || input.end <= input.start || input.end > 86400 || input.end - input.start > STUDIO_MAX_SECONDS) error(400, 'Extrait YouTube invalide (5 minutes maximum).');
+	return { url, aspect: input.aspect, start: input.start, end: input.end };
+}
+
+export function validateStudioFormat(value: unknown): StudioFormat {
+	if (value === undefined) return 'mp4';
+	if (value !== 'mp4' && value !== 'mkv' && value !== 'mp3') error(400, 'Format MP4, MKV ou MP3 requis.');
+	return value;
 }
 
 export function validateStudioEdit(input: Record<string, unknown>): StudioEdit {
@@ -82,9 +102,10 @@ export async function studioJobDirectory(id: string) {
 	return directory;
 }
 
-export async function studioOutput(id: string, kind: StudioJobKind) {
+export async function studioOutput(id: string, kind: StudioJobKind, format: StudioFormat | null = 'mp4') {
 	if (kind === 'probe') error(400, 'Cette tâche ne produit pas de fichier.');
-	return path.join(await studioJobDirectory(id), kind === 'thumbnail' ? 'output.jpg' : kind === 'dub-audio' ? 'output.m4a' : kind === 'dub' ? 'output.mkv' : 'output.mp4');
+	const extension = kind === 'thumbnail' ? 'jpg' : kind === 'dub-audio' ? 'm4a' : kind === 'dub' ? 'mkv' : kind === 'preview' ? 'mp4' : validateStudioFormat(format ?? undefined);
+	return path.join(await studioJobDirectory(id), `output.${extension}`);
 }
 
 export const studioFingerprint = (stat: Pick<Stats, 'dev' | 'ino' | 'size' | 'mtimeMs' | 'ctimeMs'>) => createHash('sha256').update(`${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`).digest('hex');
@@ -147,8 +168,10 @@ export async function ownedStudioJob(userId: string, projectId: string, id: stri
 export async function createStudioJob(userId: string, projectId: string, input: Record<string, unknown>) {
 	const edit = await ownedStudioProject(userId, projectId);
 	const kind = input.kind;
-	if (kind !== 'probe' && kind !== 'thumbnail' && kind !== 'preview' && kind !== 'export' && kind !== 'dub-audio' && kind !== 'dub') error(400, 'Tâche invalide.');
+	if (kind !== 'probe' && kind !== 'thumbnail' && kind !== 'preview' && kind !== 'export' && kind !== 'dub-audio' && kind !== 'dub' && kind !== 'youtube') error(400, 'Tâche invalide.');
 	const snapshot: StudioJobInput = { project: validateStudioEdit(edit) };
+	if (kind === 'youtube' || kind === 'export') snapshot.format = validateStudioFormat(input.format);
+	if (kind === 'youtube') snapshot.youtube = validateStudioYoutube(input.youtube);
 	if (kind === 'dub' || kind === 'dub-audio') snapshot.dubbing = validateStudioDubbing(input.dubbing);
 	if (kind === 'dub-audio') snapshot.dubbing = { url: snapshot.dubbing!.url, offset: 0 };
 	if (kind === 'probe' || kind === 'thumbnail' || kind === 'dub') {
@@ -158,7 +181,7 @@ export async function createStudioJob(userId: string, projectId: string, input: 
 			if (typeof input.time !== 'number' || !Number.isFinite(input.time) || input.time < 0 || input.time > 86400) error(400, 'Timecode invalide.');
 			snapshot.time = input.time;
 		}
-	} else if (kind !== 'dub-audio') {
+	} else if (kind !== 'dub-audio' && kind !== 'youtube') {
 		if (!snapshot.project.clips.length) error(400, 'Ajouter au moins un extrait.');
 		for (const clip of snapshot.project.clips) {
 			if ((await sourceFingerprint(clip)).fingerprint !== clip.fingerprint) error(409, 'Une source a changé. Analyser à nouveau la vidéo.');
@@ -219,7 +242,7 @@ export async function deleteStudioProject(userId: string, id: string, confirm: u
 export async function studioFile(event: RequestEvent, userId: string, projectId: string, id: string) {
 	const job = await ownedStudioJob(userId, projectId, id);
 	if (job.status !== 'completed' || job.kind === 'probe') error(404, 'Rendu indisponible.');
-	const absolute = await studioOutput(id, job.kind);
+	const absolute = await studioOutput(id, job.kind, job.format);
 	try {
 		return await fileResponse(event, absolute, path.basename(absolute), event.url.searchParams.get('inline') === '1', `/_protected/studio/${id}/${path.basename(absolute)}`);
 	} catch (cause) { if ((cause as NodeJS.ErrnoException).code === 'ENOENT') error(404, 'Rendu introuvable.'); throw cause; }
@@ -228,13 +251,13 @@ export async function studioFile(event: RequestEvent, userId: string, projectId:
 export async function publishStudioJob(userId: string, projectId: string, id: string, input: Record<string, unknown>) {
 	if (input.confirm !== true) error(400, 'Confirmer le partage avec la communauté.');
 	const job = await ownedStudioJob(userId, projectId, id);
-	if (job.status !== 'completed' || (job.kind !== 'export' && job.kind !== 'dub')) error(400, 'Export terminé requis.');
+	if (job.status !== 'completed' || (job.kind !== 'export' && job.kind !== 'dub' && job.kind !== 'youtube')) error(400, 'Export terminé requis.');
 	const name = fileName(input.name);
-	const extension = job.kind === 'dub' ? '.mkv' : '.mp4';
+	const extension = job.kind === 'dub' ? '.mkv' : `.${validateStudioFormat(job.format ?? undefined)}`;
 	if (!name.toLowerCase().endsWith(extension)) error(400, `Nom ${extension.slice(1).toUpperCase()} requis.`);
 	const destination = await resolveFile('share', name, true), directory = await resolveFile('share', '');
 	const temp = path.join(directory.absolute, `.duck-upload-${randomUUID()}`);
-	const source = await open(await studioOutput(id, job.kind), constants.O_RDONLY | constants.O_NOFOLLOW);
+	const source = await open(await studioOutput(id, job.kind, job.format), constants.O_RDONLY | constants.O_NOFOLLOW);
 	let target;
 	try {
 		const stat = await source.stat();

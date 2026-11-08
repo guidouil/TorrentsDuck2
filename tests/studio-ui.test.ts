@@ -29,10 +29,12 @@ function editor(api = vi.fn()) {
     .replace("const preparedAudio = $derived(dubbingAudio?.status === 'completed' ? dubbingAudio : undefined);", "Object.defineProperty(globalThis, 'preparedAudio', { get: () => dubbingAudio?.status === 'completed' ? dubbingAudio : undefined });");
   runInNewContext(transpile(`${script}\nglobalThis.editor = {
     refresh, addMedia, moveClip, removeClip, createJob, importSrt, cancelJob, isVideo, ask, confirm,
-    fileUrl, timecode, seek, playClip, updatePlayback, finishSeeking, selectClip, setBoundary, useDubbingAudio,
+    fileUrl, timecode, seek, playClip, updatePlayback, finishSeeking, selectClip, setBoundary, useDubbingAudio, useYoutubeJob,
     setup: (value, tasks = []) => { project = value; jobs = tasks; baseline = JSON.stringify(edit(value)); },
     playback: (element, length = 600) => { video = element; sourceDuration = length; playhead = element.currentTime; },
     dubbing: (url, offset) => { dubbingUrl = url; dubbingOffset = offset; },
+    youtube: (url, scope = 'whole', start = 0, end = 30, format = 'mp4', aspect = 'source') => { youtubeUrl = url; youtubeScope = scope; youtubeStart = start; youtubeEnd = end; youtubeFormat = format; youtubeAspect = aspect; },
+    format: (value) => { exportFormat = value; },
     state: () => ({ project, jobs, selectedIndex, error, busy, previewingClip, selectedJob, confirmation, sharedName, dubbingUrl, dubbingAudioId, dubbingOffset, preparedAudio })
   };`), context);
   context.editor.setup(structuredClone(project));
@@ -80,7 +82,7 @@ describe('studio editing', () => {
     await ui.createJob('export');
     expect(api.mock.calls[0][0]).toBe('/api/studio/project');
     expect(api.mock.calls[0][1].method).toBe('PATCH');
-    expect(api.mock.calls[1]).toEqual(['/api/studio/project/jobs', { method: 'POST', body: JSON.stringify({ kind: 'export' }) }]);
+    expect(api.mock.calls[1]).toEqual(['/api/studio/project/jobs', { method: 'POST', body: JSON.stringify({ kind: 'export', format: 'mp4' }) }]);
     expect(ui.state().selectedJob).toBe('render');
     api.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ project, jobs: [] });
     await ui.cancelJob({ id: 'render' });
@@ -117,6 +119,56 @@ describe('studio editing', () => {
     expect(rejectedInput.value).toBe('');
     expect(ui.state().project.subtitles).toBe(valid);
     expect(ui.state().error).toBe(get(t).studio.srtInvalid);
+  });
+});
+
+describe('studio YouTube downloads and output formats', () => {
+  const url = 'https://www.youtube.com/watch?v=abcdefghijk';
+
+  it.each(['mp4', 'mkv', 'mp3'])('downloads a whole YouTube source as %s without saving montage edits', async (format) => {
+    const ui = editor(vi.fn().mockResolvedValue({ job: { id: 'youtube-job', kind: 'youtube', status: 'queued', format } }));
+    ui.setup({ ...structuredClone(project), clips: [] });
+    ui.youtube(` ${url} `, 'whole', 12, 40, format, '9:16');
+    await ui.createJob('youtube');
+    expect(ui.api).toHaveBeenCalledExactlyOnceWith('/api/studio/project/jobs', {
+      method: 'POST', body: JSON.stringify({ kind: 'youtube', format, youtube: { url, aspect: format === 'mp3' ? 'source' : '9:16' } })
+    });
+    expect(ui.state().selectedJob).toBe('youtube-job');
+  });
+
+  it('extracts a passage at its source positions and keeps its framing', async () => {
+    const ui = editor(vi.fn().mockResolvedValue({ job: { id: 'clip', kind: 'youtube', status: 'queued' } }));
+    ui.youtube(url, 'clip', 600.25, 630.5, 'mkv', '16:9');
+    await ui.createJob('youtube');
+    expect(JSON.parse(ui.api.mock.calls[0][1].body)).toEqual({ kind: 'youtube', format: 'mkv', youtube: { url, aspect: '16:9', start: 600.25, end: 630.5 } });
+  });
+
+  it.each([[0, 301], [20, 10], [-1, 10], [NaN, 10], [0, Infinity], [86399, 86401]])('rejects invalid clip bounds (%s, %s) before requesting work', async (start, end) => {
+    const ui = editor();
+    ui.youtube(url, 'clip', start, end);
+    await ui.createJob('youtube');
+    expect(ui.api).not.toHaveBeenCalled();
+    expect(ui.state()).toMatchObject({ busy: false, error: get(t).studio.youtubeInvalid });
+  });
+
+  it('retries a YouTube task with its original settings', async () => {
+    const ui = editor(vi.fn().mockResolvedValue({ job: { id: 'retry', kind: 'youtube', status: 'queued' } }));
+    ui.useYoutubeJob({ kind: 'youtube', format: 'mp3', youtube: { url, start: 100, end: 110, aspect: 'source' } });
+    await ui.createJob('youtube');
+    expect(JSON.parse(ui.api.mock.calls[0][1].body)).toEqual({ kind: 'youtube', format: 'mp3', youtube: { url, aspect: 'source', start: 100, end: 110 } });
+  });
+
+  it.each(['mkv', 'mp3'])('saves the montage then exports and shares a file with its %s extension', async (format) => {
+    const job = { id: 'export', kind: 'export', status: 'completed', format };
+    const ui = editor(vi.fn().mockResolvedValueOnce({ project }).mockResolvedValueOnce({ job }).mockResolvedValueOnce({ path: `Private montage.${format}` }));
+    ui.format(format);
+    await ui.createJob('export');
+    expect(JSON.parse(ui.api.mock.calls[1][1].body)).toEqual({ kind: 'export', format });
+    ui.ask('publish', job);
+    expect(ui.state().sharedName).toBe(`Private montage.${format}`);
+    expect(ui.api).toHaveBeenCalledTimes(2);
+    await ui.confirm();
+    expect(JSON.parse(ui.api.mock.calls[2][1].body)).toEqual({ name: `Private montage.${format}`, confirm: true });
   });
 });
 

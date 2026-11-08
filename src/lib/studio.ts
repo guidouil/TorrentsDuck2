@@ -9,15 +9,18 @@ export type StudioMedia = StudioSource & {
 	duration: number; width: number; height: number; fingerprint: string;
 	audio: { index: number; label: string }[];
 };
-export type StudioJobKind = 'probe' | 'thumbnail' | 'preview' | 'export' | 'dub-audio' | 'dub';
+export type StudioFormat = 'mp4' | 'mkv' | 'mp3';
+export type StudioYoutube = { url: string; start?: number; end?: number; aspect: 'source' | '16:9' | '9:16' };
+export type StudioJobKind = 'probe' | 'thumbnail' | 'preview' | 'export' | 'dub-audio' | 'dub' | 'youtube';
 export type StudioJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type StudioJob = {
 	id: string; projectId: string; kind: StudioJobKind; status: StudioJobStatus; progress: number;
 	error: string | null; result: StudioMedia | null; createdAt: string; updatedAt: string;
 	dubbing?: StudioDubbing | null;
+	format?: StudioFormat | null; youtube?: StudioYoutube | null;
 };
 export type StudioDubbing = { url: string; offset: number; audioJobId?: string };
-export type StudioJobInput = { project: StudioEdit; source?: StudioSource; fingerprint?: string; time?: number; dubbing?: StudioDubbing };
+export type StudioJobInput = { project: StudioEdit; source?: StudioSource; fingerprint?: string; time?: number; dubbing?: StudioDubbing; format?: StudioFormat; youtube?: StudioYoutube };
 export type StudioCue = { start: number; end: number; text: string };
 
 export const studioDuration = (clips: StudioClip[]) => clips.reduce((seconds, clip) => seconds + clip.end - clip.start, 0);

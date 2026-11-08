@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocked = vi.hoisted(() => ({ lookup: vi.fn(), connect: vi.fn(), remotes: [] as Socket[] }));
 vi.mock('node:dns/promises', () => ({ lookup: mocked.lookup }));
 vi.mock('node:net', async (original) => ({ ...await original<typeof import('node:net')>(), connect: mocked.connect }));
-import { withYoutubeProxy, youtubeDestination } from '../src/lib/server/studio-youtube';
+import { STUDIO_AUDIO_MAX_BYTES, STUDIO_YOUTUBE_MAX_BYTES, withYoutubeProxy, youtubeDestination } from '../src/lib/server/studio-youtube';
 
 function tunnel(proxy: string, authority = 'www.youtube.com:443') {
 	return new Promise<Socket>((resolve, reject) => {
@@ -29,6 +29,10 @@ beforeEach(() => {
 });
 
 describe('YouTube download network boundary', () => {
+	it('keeps the dubbing audio budget at 1 GiB and allows 10 GiB for the downloader', () => {
+		expect(STUDIO_AUDIO_MAX_BYTES).toBe(1024 ** 3);
+		expect(STUDIO_YOUTUBE_MAX_BYTES).toBe(10 * 1024 ** 3);
+	});
 	it.each(['youtube.com.evil.example:443', 'googlevideo.com@127.0.0.1:443', '127.0.0.1:443', 'www.youtube.com:80', 'www.youtube.com:5432', 'example.com:443'])('rejects other hosts and ports before DNS: %s', async (authority) => {
 		await expect(youtubeDestination(authority, new AbortController().signal)).rejects.toThrow('interdite');
 		expect(mocked.lookup).not.toHaveBeenCalled();
@@ -58,7 +62,7 @@ describe('YouTube download network boundary', () => {
 			const stopped = new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
 			mocked.remotes[1].push('5678');
 			await stopped;
-		}, 6)).rejects.toThrow('trop volumineuse');
+		}, 6)).rejects.toThrow('6 octets maximum');
 		expect(mocked.remotes.every((remote) => remote.destroyed)).toBe(true);
 	});
 	it('aborts the downloader and destroys sockets when access is revoked or the task is cancelled', async () => {

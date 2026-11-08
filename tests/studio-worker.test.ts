@@ -57,7 +57,8 @@ describe('Studio deterministic rendering', () => {
 		expect(studioDimensions('9:16', true)).toEqual([360, 640]);
 	});
 	it('keeps user text out of filter expressions and uses safe generated text files', () => {
-		const filter = studioVideoFilter({ ...clip, title: "':movie=/etc/passwd" }, 1080, 1920, 'title-0.txt', 'captions-0.ass');
+		const malicious = { ...clip, title: "':movie=/etc/passwd" };
+		const filter = studioVideoFilter(malicious, 1080, 1920, 'title-0.txt', 'captions-0.ass');
 		expect(filter).toContain("x='(iw-ow)*0.75'");
 		expect(filter).toContain("y='(ih-oh)*0.25'");
 		expect(filter).toContain('scale=1080:1920');

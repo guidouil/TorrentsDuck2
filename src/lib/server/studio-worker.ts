@@ -6,12 +6,12 @@ import path from 'node:path';
 import type { PoolClient } from 'pg';
 import { isHttpError } from '@sveltejs/kit';
 import { db } from './db.js';
-import { requireStudioStorage, sourceFingerprint, studioFingerprint, studioJobDirectory, studioOutput, studioRoot, validateStudioDubbing, validateStudioEdit } from './studio.js';
-import { STUDIO_AUDIO_MAX_BYTES, withYoutubeProxy } from './studio-youtube.js';
+import { requireStudioStorage, sourceFingerprint, studioFingerprint, studioJobDirectory, studioOutput, studioRoot, validateStudioDubbing, validateStudioEdit, validateStudioFormat, validateStudioYoutube } from './studio.js';
+import { STUDIO_AUDIO_MAX_BYTES, STUDIO_YOUTUBE_MAX_BYTES, withYoutubeProxy } from './studio-youtube.js';
 import { parseStudioSrt, studioDuration } from '../studio.js';
-import type { StudioClip, StudioCue, StudioEdit, StudioJobInput, StudioJobKind, StudioMedia, StudioSource } from '../studio.js';
+import type { StudioClip, StudioCue, StudioEdit, StudioFormat, StudioJobInput, StudioJobKind, StudioMedia, StudioSource } from '../studio.js';
 
-const formats = 'mov,matroska,webm,avi,flv,mpeg,mpegts,ogg,asf';
+const formats = 'mov,matroska,webm,avi,flv,mpeg,mpegts,ogg,asf,mp3';
 const workerLock = 782413;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const baseArgs = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1'];
@@ -76,7 +76,7 @@ export async function runStudioProcess(command: string, args: string[], options:
 			clearTimeout(killTimer);
 			options.signal.removeEventListener('abort', abort);
 			if (failure) reject(failure);
-			else if (code !== 0) reject(new Error(command === 'yt-dlp' ? 'Bande son YouTube inaccessible. Vérifiez le lien et mettez yt-dlp à jour si nécessaire.' : 'Média non pris en charge ou traitement vidéo impossible.'));
+			else if (code !== 0) reject(new Error(command === 'yt-dlp' ? 'Média YouTube inaccessible. Vérifiez le lien et mettez yt-dlp à jour si nécessaire.' : 'Média non pris en charge ou traitement vidéo impossible.'));
 			else resolve(output);
 		});
 		if (options.signal.aborted) abort();
@@ -129,22 +129,23 @@ async function inspectSource(source: StudioSource, fingerprint: string, context:
 	});
 }
 
-export function studioDimensions(aspect: StudioEdit['aspect'], preview: boolean) {
-	const horizontal = preview ? [640, 360] : [1920, 1080];
+export function studioDimensions(aspect: StudioEdit['aspect'], preview: boolean): [number, number] {
+	const horizontal: [number, number] = preview ? [640, 360] : [1920, 1080];
 	return aspect === '16:9' ? horizontal : [horizontal[1], horizontal[0]];
 }
 
-export function validateStudioOutput(data: unknown, width: number, height: number, duration: number) {
+export function validateStudioOutput(data: unknown, width: number, height: number, duration: number, format: StudioFormat = 'mp4', videoCodec = 'h264') {
 	const probe = data as { format?: { duration?: string }; streams?: { codec_type?: string; codec_name?: string; width?: number; height?: number; sample_rate?: string; channels?: number }[] };
 	const actualDuration = Number(probe?.format?.duration);
 	const video = probe?.streams?.find((stream) => stream.codec_type === 'video');
 	const audio = probe?.streams?.find((stream) => stream.codec_type === 'audio');
-	if (!Number.isFinite(actualDuration) || actualDuration <= 0 || Math.abs(actualDuration - duration) > 0.15 || video?.codec_name !== 'h264' || video.width !== width || video.height !== height || audio?.codec_name !== 'aac' || audio.sample_rate !== '48000' || audio.channels !== 2) {
+	const videoValid = format === 'mp3' ? !video : video?.codec_name === videoCodec && video.width === width && video.height === height;
+	if (!Number.isFinite(actualDuration) || actualDuration <= 0 || Math.abs(actualDuration - duration) > 0.15 || !videoValid || audio?.codec_name !== (format === 'mp3' ? 'mp3' : 'aac') || audio.sample_rate !== '48000' || audio.channels !== 2) {
 		throw new Error('Rendu incomplet ou format de sortie invalide.');
 	}
 }
 
-export function studioVideoFilter(clip: StudioClip, width: number, height: number, titleFile?: string, subtitlesFile?: string) {
+export function studioVideoFilter(clip: Pick<StudioClip, 'x' | 'y'>, width: number, height: number, titleFile?: string, subtitlesFile?: string) {
 	const aspect = width / height;
 	const filters = [
 		`crop=w='trunc(min(iw,ih*${aspect}/sar)/2)*2':h='trunc(min(ih,iw*sar/${aspect})/2)*2':x='(iw-ow)*${clip.x}':y='(ih-oh)*${clip.y}'`,
@@ -174,19 +175,92 @@ async function cleanDirectory(directory: string, keep?: string) {
 	}
 }
 
-async function downloadStudioAudio(url: string, directory: string, context: WorkContext) {
-	const downloaded = path.join(directory, 'audio.download');
-	await withYoutubeProxy(context.signal, (proxy, signal) => runStudioProcess('yt-dlp', [
+async function downloadYoutube(url: string, downloaded: string, format: string, proxy: string, context: WorkContext, maximum = STUDIO_AUDIO_MAX_BYTES) {
+	await runStudioProcess('yt-dlp', [
 		'--ignore-config', '--no-plugin-dirs', '--no-js-runtimes', '--js-runtimes', 'node', '--no-remote-components',
 		'--use-extractors', 'youtube', '--no-playlist', '--no-cache-dir', '--no-part', '--no-overwrites', '--no-warnings',
 		'--downloader', 'native', '--fixup', 'never', '--socket-timeout', '20', '--retries', '2', '--fragment-retries', '2',
-		'--match-filter', '!is_live & !is_upcoming & duration <= 86400', '--max-filesize', String(STUDIO_AUDIO_MAX_BYTES),
-		'--format', 'bestaudio[language^=fr][protocol=https]/bestaudio[protocol=https]',
+		'--match-filter', '!is_live & !is_upcoming & duration <= 86400', '--max-filesize', String(maximum),
+		'--format', format,
 		'--proxy', proxy, '--output', downloaded, '--', url
-	], { ...context, signal, cwd: directory, timeout: 1_800_000 }));
+	], { ...context, cwd: path.dirname(downloaded), timeout: 1_800_000 });
+	return downloaded;
+}
+
+async function downloadStudioAudio(url: string, directory: string, context: WorkContext) {
+	const downloaded = await withYoutubeProxy(context.signal, (proxy, signal) => downloadYoutube(url, path.join(directory, 'audio.download'),
+		'bestaudio[language^=fr][protocol=https]/bestaudio[protocol=https]', proxy, { ...context, signal }));
 	context.signal.throwIfAborted();
 	context.progress?.(20);
 	return downloaded;
+}
+
+async function downloadStudioYoutube(job: WorkerJob, directory: string, context: WorkContext) {
+	const youtube = validateStudioYoutube(job.input.youtube), format = validateStudioFormat(job.input.format);
+	const audioPath = path.join(directory, 'audio.download'), videoPath = path.join(directory, 'video.download');
+	const downloadSignal = AbortSignal.any([context.signal, AbortSignal.timeout(1_800_000)]);
+	await withYoutubeProxy(downloadSignal, async (proxy, signal) => {
+		await downloadYoutube(youtube.url, audioPath, 'bestaudio[protocol=https]/best[protocol=https]', proxy, { ...context, signal }, STUDIO_YOUTUBE_MAX_BYTES);
+		if (format !== 'mp3') await downloadYoutube(youtube.url, videoPath, 'bestvideo[protocol=https]/best[protocol=https]', proxy, { ...context, signal }, STUDIO_YOUTUBE_MAX_BYTES);
+	}, STUDIO_YOUTUBE_MAX_BYTES);
+	context.progress?.(20);
+	let audio = await open(audioPath, constants.O_RDONLY | constants.O_NOFOLLOW), video: FileHandle | undefined;
+	const partial = path.join(directory, `youtube.partial.${format}`);
+	let duration = 0, width = 0, height = 0, videoCodec = 'h264';
+	try {
+		const audioDuration = await inspectStudioAudio(audio, context, STUDIO_YOUTUBE_MAX_BYTES);
+		await audio.close();
+		audio = await open(audioPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+		let sourceDuration = audioDuration, sourceCodec = '', videoIndex = 0;
+		if (format !== 'mp3') {
+			video = await open(videoPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+			const stat = await video.stat();
+			if (!stat.isFile() || stat.size === 0 || stat.size > STUDIO_YOUTUBE_MAX_BYTES) throw new Error('Vidéo YouTube absente ou trop volumineuse.');
+			const probe = JSON.parse(await runStudioProcess('ffprobe', [
+				'-v', 'error', '-threads', '1', ...inputArgs, '-show_entries', 'format=duration:stream=index,codec_type,codec_name,width,height', '-of', 'json'
+			], { ...context, fd: video.fd, capture: true, timeout: 30_000 }));
+			const stream = probe.streams?.find((stream: { codec_type: string }) => stream.codec_type === 'video');
+			sourceDuration = Number(probe.format?.duration);
+			width = stream?.width; height = stream?.height; sourceCodec = stream?.codec_name; videoIndex = stream?.index;
+			if (!Number.isFinite(sourceDuration) || sourceDuration <= 0 || sourceDuration > 86400 || !Number.isInteger(videoIndex) ||
+				!Number.isInteger(width) || !Number.isInteger(height) || width < 2 || height < 2 || width > 8192 || height > 8192 || !sourceCodec) throw new Error('Vidéo YouTube ou dimensions invalides.');
+			await video.close();
+			video = await open(videoPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+		}
+		if (youtube.end !== undefined && youtube.end > sourceDuration + 0.05) throw new Error('Extrait au-delà de la vidéo YouTube.');
+		duration = youtube.end !== undefined ? youtube.end - youtube.start! : sourceDuration;
+		const crop = format !== 'mp3' && youtube.aspect !== 'source';
+		const copyVideo = format !== 'mp3' && youtube.start === undefined && !crop && (format === 'mkv' || sourceCodec === 'h264');
+		videoCodec = copyVideo ? sourceCodec : 'h264';
+		const filters = crop ? studioVideoFilter({ x: 0.5, y: 0.5 }, ...studioDimensions(youtube.aspect as StudioEdit['aspect'], false)) : 'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,format=yuv420p';
+		if (crop) [width, height] = studioDimensions(youtube.aspect as StudioEdit['aspect'], false);
+		else if (!copyVideo) { width -= width % 2; height -= height % 2; }
+		await requireStudioStorage(copyVideo ? (await video!.stat()).size + Math.ceil(duration * 25000) : Math.ceil(duration * (format === 'mp3' ? 25000 : 1_000_000)));
+		const seek = youtube.start !== undefined ? ['-ss', String(youtube.start)] : [];
+		await runStudioProcess('ffmpeg', [
+			...baseArgs, ...seek, ...inputArgs,
+			...(video ? [...seek, '-protocol_whitelist', 'fd', '-format_whitelist', formats, '-max_streams', '8', '-fd', '4', '-i', 'fd:'] : []),
+			...(video ? ['-map', `0:${videoIndex}`, '-map', '1:a:0', '-c:v', copyVideo ? 'copy' : 'libx264',
+				...(copyVideo ? [] : ['-vf', filters, '-preset', 'veryfast', '-crf', '20', '-threads', '1'])] : ['-map', '0:a:0', '-vn']),
+			'-c:a', format === 'mp3' ? 'libmp3lame' : 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
+			'-af', 'aresample=48000:async=1:first_pts=0,apad', '-t', String(duration), '-map_metadata', '-1', '-map_chapters', '-1',
+			...(format === 'mp4' ? ['-movflags', '+faststart'] : []), '-progress', 'pipe:1', '-f', format === 'mkv' ? 'matroska' : format, partial
+		], { ...context, fds: video ? [video.fd, audio.fd] : [audio.fd], progress: (seconds) => context.progress?.(20 + Math.min(75, seconds / duration * 75)) });
+	} finally { await audio.close(); await video?.close(); }
+	const rendered = await open(partial, constants.O_RDONLY | constants.O_NOFOLLOW);
+	try {
+		if ((await rendered.stat()).size === 0) throw new Error('Téléchargement YouTube vide.');
+		const metadata = await runStudioProcess('ffprobe', [
+			'-v', 'error', '-threads', '1', ...inputArgs, '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height,sample_rate,channels', '-of', 'json'
+		], { ...context, fd: rendered.fd, capture: true, timeout: 30_000 });
+		validateStudioOutput(JSON.parse(metadata), width, height, duration, format, videoCodec);
+	} finally { await rendered.close(); }
+	context.signal.throwIfAborted();
+	await requireStudioStorage();
+	const output = await studioOutput(job.id, job.kind, format);
+	await rename(partial, output);
+	await chmod(output, 0o644);
+	await cleanDirectory(directory, path.basename(output));
 }
 
 async function inspectStudioAudio(audio: FileHandle, context: WorkContext, maxBytes = STUDIO_AUDIO_MAX_BYTES) {
@@ -298,6 +372,10 @@ export async function runStudioJob(job: WorkerJob, context: WorkContext): Promis
 		await dubStudioVideo(job, directory, context);
 		return null;
 	}
+	if (job.kind === 'youtube') {
+		await downloadStudioYoutube(job, directory, context);
+		return null;
+	}
 	if (job.kind === 'probe' || job.kind === 'thumbnail') {
 		if (!job.input.source || !job.input.fingerprint) throw new Error('Source requise.');
 		const media = await inspectSource(job.input.source, job.input.fingerprint, context);
@@ -318,7 +396,8 @@ export async function runStudioJob(job: WorkerJob, context: WorkContext): Promis
 		await chmod(output, 0o644);
 		return null;
 	}
-	const output = await studioOutput(job.id, job.kind);
+	const format = job.kind === 'preview' ? 'mp4' : validateStudioFormat(job.input.format);
+	const output = await studioOutput(job.id, job.kind, format);
 	const project = validateStudioEdit(job.input.project as unknown as Record<string, unknown>);
 	const duration = studioDuration(project.clips);
 	if (!project.clips.length || duration <= 0) throw new Error('Montage vide.');
@@ -340,8 +419,9 @@ export async function runStudioJob(job: WorkerJob, context: WorkContext): Promis
 			throw new Error('Découpe, piste audio ou version de source invalide.');
 		}
 		const clipDuration = clip.end - clip.start;
-		const segment = `clip-${index}.mp4`, titleFile = clip.title ? `title-${index}.txt` : undefined;
-		const subtitlesFile = cues.length ? `captions-${index}.ass` : undefined;
+		const audioOnly = format === 'mp3';
+		const segment = `clip-${index}.${audioOnly ? 'm4a' : 'mp4'}`, titleFile = !audioOnly && clip.title ? `title-${index}.txt` : undefined;
+		const subtitlesFile = !audioOnly && cues.length ? `captions-${index}.ass` : undefined;
 		if (titleFile) await writeFile(path.join(directory, titleFile), clip.title, { flag: 'wx', mode: 0o600 });
 		if (subtitlesFile) await writeFile(path.join(directory, subtitlesFile), studioAss(cues, width, height, elapsed, clipDuration), { flag: 'wx', mode: 0o600 });
 		// Generated filenames are the only paths allowed in filter expressions.
@@ -349,10 +429,9 @@ export async function runStudioJob(job: WorkerJob, context: WorkContext): Promis
 		await withSource(clip, clip.fingerprint, (handle) => runStudioProcess('ffmpeg', [
 			...baseArgs, '-ss', String(clip.start), ...inputArgs,
 			...(clip.audio === null ? ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo'] : []),
-			'-map', `0:${source!.media.videoIndex}`, '-map', clip.audio === null ? '1:a:0' : `0:${clip.audio}`,
-			'-vf', videoFilter, '-af', `aresample=48000:async=1:first_pts=0,apad,atrim=duration=${clipDuration},asetpts=PTS-STARTPTS`,
-			'-t', String(clipDuration), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', job.kind === 'preview' ? '26' : '20',
-			'-threads', '1', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-video_track_timescale', '90000',
+			...(audioOnly ? ['-vn'] : ['-map', `0:${source!.media.videoIndex}`, '-vf', videoFilter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', job.kind === 'preview' ? '26' : '20', '-video_track_timescale', '90000']),
+			'-map', clip.audio === null ? '1:a:0' : `0:${clip.audio}`, '-af', `aresample=48000:async=1:first_pts=0,apad,atrim=duration=${clipDuration},asetpts=PTS-STARTPTS`,
+			'-t', String(clipDuration), '-threads', '1', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2',
 			'-map_metadata', '-1', '-map_chapters', '-1', '-movflags', '+faststart', '-progress', 'pipe:1', '-f', 'mp4', path.join(directory, segment)
 		], { ...context, fd: handle.fd, cwd: directory, progress: (seconds) => context.progress?.(Math.min(95, (elapsed + Math.min(clipDuration, seconds)) / duration * 95)) }));
 		files.push(`file '${segment}'\nduration ${clipDuration}`);
@@ -360,11 +439,12 @@ export async function runStudioJob(job: WorkerJob, context: WorkContext): Promis
 	}
 	const list = path.join(directory, 'clips.ffconcat');
 	await writeFile(list, `ffconcat version 1.0\n${files.join('\n')}\n`, { flag: 'wx', mode: 0o600 });
-	const partial = path.join(directory, 'render.partial.mp4');
+	const partial = path.join(directory, `render.partial.${format}`);
 	await runStudioProcess('ffmpeg', [
 		...baseArgs, '-protocol_whitelist', 'file', '-format_whitelist', 'concat,mov', '-f', 'concat', '-safe', '1', '-i', list,
-		'-map', '0:v:0', '-map', '0:a:0', '-c', 'copy', '-t', String(duration), '-map_metadata', '-1', '-map_chapters', '-1',
-		'-movflags', '+faststart', '-f', 'mp4', partial
+		...(format === 'mp3' ? ['-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', '192k', '-ar', '48000', '-ac', '2'] : ['-map', '0:v:0', '-map', '0:a:0', '-c', 'copy']),
+		'-t', String(duration), '-map_metadata', '-1', '-map_chapters', '-1',
+		...(format === 'mp4' ? ['-movflags', '+faststart'] : []), '-f', format === 'mkv' ? 'matroska' : format, partial
 	], context);
 	const rendered = await open(partial, constants.O_RDONLY | constants.O_NOFOLLOW);
 	try {
@@ -373,7 +453,7 @@ export async function runStudioJob(job: WorkerJob, context: WorkContext): Promis
 			'-v', 'error', '-threads', '1', ...inputArgs,
 			'-show_entries', 'format=duration:stream=codec_type,codec_name,width,height,sample_rate,channels', '-of', 'json'
 		], { ...context, fd: rendered.fd, capture: true, timeout: 30_000 });
-		validateStudioOutput(JSON.parse(metadata), width, height, duration);
+		validateStudioOutput(JSON.parse(metadata), width, height, duration, format);
 	} finally { await rendered.close(); }
 	for (const { clip } of sources.values()) {
 		if ((await sourceFingerprint(clip)).fingerprint !== clip.fingerprint) throw new Error('La source a changé pendant le rendu.');
