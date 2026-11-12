@@ -271,12 +271,10 @@ def main():
                 denied(lambda: client.sendcmd("PROT C"))
                 denied(lambda: client.sendcmd("REIN"))
                 denied(lambda: client.sendcmd("USER admin"))
-            denied(lambda: member.delete("/downloads/delete.txt"))
-            denied(lambda: member.delete("/share/../downloads/delete.txt"))
+            denied(lambda: member.delete("/share/download-link/delete.txt"))
             denied(lambda: admin.retrbinary("RETR /../../etc/passwd", lambda _: None))
-            denied(lambda: member.rmd("/downloads/empty"))
-            admin.delete("/downloads/delete.txt")
-            admin.rmd("/downloads/empty")
+            member.delete("/downloads/delete.txt")
+            member.rmd("/downloads/empty")
             assert not (work / "downloads/delete.txt").exists() and not (work / "downloads/empty").exists()
             denied(lambda: admin.storbinary("STOR /share/upload.txt", io.BytesIO(b"resume"), rest=1))
             member.storbinary("STOR /share/upload.txt", io.BytesIO(b"shared fixture"))
@@ -291,7 +289,7 @@ def main():
             member.retrbinary("RETR /share/renamed.txt", received.write)
             assert received.getvalue() == b"shared fixture"
             member.delete("/share/renamed.txt")
-            print("PASS FTPS: mandatory TLS, Unicode login, admin-only downloads deletion, protected roots/symlinks, exclusive share uploads/rename/delete", flush=True)
+            print("PASS FTPS: mandatory TLS, Unicode login, member downloads deletion, protected roots/symlinks, exclusive share uploads/rename/delete", flush=True)
 
             extra = [ftp_client("other") for _ in range(5)]
             try:
@@ -316,11 +314,12 @@ def main():
             docker("start", ftp)
             ftp_port = port(ftp, 21000)
             admin = eventually(lambda: ftp_client("admin"))
-            denied(lambda: admin.delete("/downloads/legal-fixture.txt"))
+            admin.delete("/downloads/legal-fixture.txt")
+            assert not (work / "downloads/legal-fixture.txt").exists()
             admin.quit()
             member = ftp_client()
             other = ftp_client("other")
-            print("PASS FTPS: eight-session IP limit and administrator demotion revokes deletion", flush=True)
+            print("PASS FTPS: eight-session IP limit and administrator demotion preserves member deletion", flush=True)
 
             update_policy("/revoke", {})
 

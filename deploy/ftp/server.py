@@ -140,7 +140,7 @@ class Handler(TLS_FTPHandler):
         os.setuid(10000)
         self.authorizer.user_table[self.username]["home"] = "/"
         self.authorizer.override_perm(self.username, "/share", "elrdfmw", recursive=True)
-        self.authorizer.override_perm(self.username, "/downloads", "elrd" if self.role == "admin" else "elr", recursive=True)
+        self.authorizer.override_perm(self.username, "/downloads", "elrd", recursive=True)
         super().handle_auth_success("/", "", message)
 
     def ftp_USER(self, line):

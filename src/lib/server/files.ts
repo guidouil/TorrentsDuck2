@@ -10,7 +10,6 @@ import { error, isHttpError } from '@sveltejs/kit';
 import type { RequestEvent } from '@sveltejs/kit';
 import busboy from 'busboy';
 import { requireStorage } from './storage';
-import type { Member } from './permissions';
 import { mkvAudio } from './mkv.js';
 
 const run = promisify(execFile);
@@ -114,9 +113,9 @@ export async function listStreamingFiles(space: Space, search = '') {
 	return { entries, total: entries.length };
 }
 
-export async function changeFiles(input: Record<string, unknown>, role: Member['role'] = 'member') {
+export async function changeFiles(input: Record<string, unknown>) {
 	const space = fileSpace(input.space);
-	if (space === 'downloads' && (role !== 'admin' || input.action !== 'delete')) error(403, 'Seuls les administrateurs peuvent supprimer les téléchargements.');
+	if (space === 'downloads' && input.action !== 'delete') error(403, 'Seule la suppression est autorisée dans les téléchargements.');
 	const source = await resolveFile(space, input.path ?? '');
 	if (input.action === 'mkdir') {
 		if (!(await lstat(source.absolute)).isDirectory()) error(400, 'Dossier requis.');
@@ -149,7 +148,7 @@ export async function moveWithoutReplacement(source: string, destination: string
 
 export async function uploadFile(event: RequestEvent) {
 	const space = fileSpace(event.url.searchParams.get('space') ?? 'share');
-	if (space !== 'share') error(403, 'Les téléchargements sont en lecture seule.');
+	if (space !== 'share') error(403, 'L’envoi de fichiers est interdit dans les téléchargements.');
 	// Metadata belongs in the URL so the destination is checked before streaming the first byte.
 	const directory = await resolveFile(space, event.url.searchParams.get('path') ?? '');
 	if (!(await lstat(directory.absolute)).isDirectory()) error(400, 'Dossier requis.');

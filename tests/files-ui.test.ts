@@ -8,7 +8,7 @@ type Player = {
   canPlayType: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn>; play: ReturnType<typeof vi.fn>;
 };
 
-function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedValue({ entries: [], total: 0 }), device = { userAgent: '', maxTouchPoints: 0 }, role = 'member') {
+function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedValue({ entries: [], total: 0 }), device = { userAgent: '', maxTouchPoints: 0 }) {
   const goto = vi.fn();
   const script = readFileSync(new URL('../src/routes/(app)/files/+page.svelte', import.meta.url), 'utf8')
     .split('<script lang="ts">')[1].split('</script>')[0].replace(/^\s*import .+;\s*$/gm, '');
@@ -19,10 +19,9 @@ function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedVa
   const context: Record<string, any> = {
     URL: PreviewURL, URLSearchParams, Blob, api, goto, navigator: device, window: { location: { assign, origin: new URL(url).origin } }, document: { createElement: vi.fn(() => anchor) }, $t: { audioResumeHelp: 'Resume playback', browserUnsupported: 'Unsupported media' },
     page: { url: new URL(url), shallow: shallowUrl ? { url: new URL(shallowUrl) } : null },
-    $props: () => ({ data: { user: { role } } }),
     $state: (value: unknown) => value, $derived: (value: unknown) => value, $effect: () => {}
   };
-  runInNewContext(transpile(`${script}\nglobalThis.explorer = { browse, enter, switchSpace, loadFiles, fileIcon, mobileVlcUrl, makeLink, ask, mutate, openVideo, changeAudioTrack, loadedVideo, canPlayAudio, setPlayer: (element) => { player = element; }, videoSource: () => video ? fileUrl(video, true, selectedAudio) : '', state: () => ({ space, path, query, sort, streaming, entries, loading, busy, error, link, linkOpen, vlcLink, canDelete, dialogOpen, selected, video, videoOpen, audioTracks, selectedAudio, audioLoading, audioError, mobilePlayback }) };`), context);
+  runInNewContext(transpile(`${script}\nglobalThis.explorer = { browse, enter, switchSpace, loadFiles, fileIcon, mobileVlcUrl, makeLink, ask, mutate, openVideo, changeAudioTrack, loadedVideo, canPlayAudio, setPlayer: (element) => { player = element; }, videoSource: () => video ? fileUrl(video, true, selectedAudio) : '', state: () => ({ space, path, query, sort, streaming, entries, loading, busy, error, link, linkOpen, vlcLink, dialogOpen, selected, video, videoOpen, audioTracks, selectedAudio, audioLoading, audioError, mobilePlayback }) };`), context);
   return { api, goto, assign, anchor, createObjectURL, ...context.explorer as {
     browse: (values: Record<string, string>, replace?: boolean) => void;
     enter: (path: string) => void;
@@ -39,7 +38,7 @@ function explorer(url: string, shallowUrl?: string, api = vi.fn().mockResolvedVa
     canPlayAudio: (codec: string) => boolean;
     setPlayer: (element: Player) => void;
     videoSource: () => string;
-    state: () => { space: string; path: string; query: string; sort: string; streaming: boolean; entries: unknown[]; loading: boolean; busy: boolean; error: string; link: unknown; linkOpen: boolean; vlcLink: string; canDelete: boolean; dialogOpen: boolean; selected: unknown; video: unknown; videoOpen: boolean; audioTracks: unknown[]; selectedAudio: string; audioLoading: boolean; audioError: string; mobilePlayback: boolean };
+    state: () => { space: string; path: string; query: string; sort: string; streaming: boolean; entries: unknown[]; loading: boolean; busy: boolean; error: string; link: unknown; linkOpen: boolean; vlcLink: string; dialogOpen: boolean; selected: unknown; video: unknown; videoOpen: boolean; audioTracks: unknown[]; selectedAudio: string; audioLoading: boolean; audioError: string; mobilePlayback: boolean };
   } };
 }
 
@@ -48,17 +47,10 @@ const shared = `${origin}?space=share&path=Films%2F%C3%89t%C3%A9+2026&search=ver
 
 describe('file deletion', () => {
   it.each([
-    [origin, 'member', false],
-    [origin, 'admin', true],
-    [shared, 'member', true],
-    [shared, 'admin', true]
-  ])('offers deletion for %s as %s: %s', (url, role, expected) => {
-    expect(explorer(url, undefined, undefined, undefined, role).state().canDelete).toBe(expected);
-  });
-
-  it('asks before deleting a download and sends explicit confirmation on submit', async () => {
-    const files = explorer(origin, undefined, undefined, undefined, 'admin');
-    const entry = { name: 'film.mkv', path: 'Films/film.mkv' };
+    { name: 'film.mkv', path: 'Films/film.mkv' },
+    { name: 'Films', path: 'Films' }
+  ])('asks before deleting a download ($path) and sends explicit confirmation on submit', async (entry) => {
+    const files = explorer(origin);
     files.ask('delete', entry);
     expect(files.state()).toMatchObject({ dialogOpen: true, selected: entry });
     expect(files.api).not.toHaveBeenCalled();

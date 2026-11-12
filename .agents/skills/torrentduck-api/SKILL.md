@@ -37,7 +37,7 @@ helper partagé, ses appelants et les tests associés avant de changer le contra
 - Fichiers : utiliser `fileSpace`, `relativePath`, `fileName` et `resolveFile`
   de `files.ts`. Préserver le refus des traversées/liens symboliques, l'ouverture
   sans suivi de lien et les opérations sans écrasement concurrent. `share`
-  est modifiable directement ; dans `downloads`, seuls les administrateurs actifs
+  est modifiable directement ; dans `downloads`, tous les membres actifs
   et approuvés peuvent supprimer des fichiers ou dossiers, avec confirmation web.
   Upload, renommage et création y restent interdits. Ne pas charger un upload
   entier en mémoire.
